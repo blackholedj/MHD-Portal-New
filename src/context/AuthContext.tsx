@@ -1,91 +1,135 @@
 // src/context/AuthContext.tsx
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase/client'; // Předpokládáme cestu k vaší inicializaci klienta
-import { Session, User } from '@supabase/supabase-js';
-import { GridLoader } from 'react-spinners';
+'use client';
 
-// Definice typu pro uživatele a jeho roli (pro zjednodušení)
-// V reálném projektu budete chtít načítat roli z tabulky 'profiles'
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { Session, User } from '@supabase/supabase-js';
+
+// --- TYPY ---
+export type Role = 'ghost' | 'user' | 'admin'; 
+
+// Definice struktury dat, která se stáhnou z tabulky 'profiles'
+interface ProfileData {
+  role: Role;
+  full_name: string | null;
+  status: 'pending' | 'approved';
+  is_blocked: boolean;
+}
+
 interface AuthState {
   session: Session | null;
   user: User | null;
-  role: 'ghost' | 'user' | 'admin'; // Přidáváme definici role
+  full_name: string | null;
+  role: Role; 
   isLoading: boolean;
+  status: 'pending' | 'approved';
+  is_blocked: boolean;
 }
 
-// Inicializace kontextu
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
-// Funkce pro získání role (zatím velmi zjednodušená/statická)
-// V pokročilé fázi by tato funkce četla data z tabulky 'profiles' v Supabase
-const getUserRole = (user: User | null): 'ghost' | 'user' | 'admin' => {
+// --- ASYNCHRONNÍ FUNKCE PRO ZÍSKÁNÍ ROLE A JMÉNA Z DATABÁZE ---
+// Tato funkce nyní vrací obě hodnoty.
+const fetchUserProfileData = async (user: User | null): Promise<ProfileData> => {
+  // 1. Nepřihlášený uživatel
   if (!user) {
-    return 'ghost';
+    return { role: 'ghost', full_name: null, status: 'pending', is_blocked: false };
   }
   
-  // Zde můžete implementovat logiku pro získání role z databáze
-  // Pro účely nastavení: pokud je přihlášen, defaultně 'user'. 
-  // Admina byste identifikoval např. podle emailu nebo databáze.
-  if (user.email === 'preissler.jirik@gmail.com') { // Příklad pro admina
-      return 'admin';
+  // 2. Získání role A jména z tabulky 'profiles'
+  const { data, error } = await supabase
+    .from('profiles')
+    // POZOR ZDE: Změna selectu, aby stahoval obě hodnoty
+    .select('role, full_name, status, is_blocked, email') 
+    .eq('id', user.id)
+    .single();
+  //console.log('Fetched profile data:', data, 'Error:', error);
+  if (error || !data) {
+    console.error('Chyba při získávání dat profilu z databáze:', error?.message);
+    // Bezpečný fallback: defaultní role a prázdné jméno
+    return { role: 'user' , full_name: user.email?.split('@')[0] ?? null, status: 'pending', is_blocked: false  };
   }
-  
-  return 'user';
+
+  // 3. Kontrola a vrácení dat
+  const userRole = data.role as Role; 
+  const fullName = data.full_name;
+  const status = data.status;
+  const isBlocked = data.is_blocked;
+
+  return { 
+    // Zajištění, že role je vždy 'user' nebo 'admin' (nebo fallback)
+    role: (userRole === 'admin') ? 'admin' : 'user', 
+    full_name: fullName,
+    status,
+    is_blocked: isBlocked,
+  };
 };
 
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [role, setRole] = useState<'ghost' | 'user' | 'admin'>('ghost');
+  const [full_name, setFullName] = useState<string | null>(null);
+  const [role, setRole] = useState<Role>('ghost');
   const [isLoading, setIsLoading] = useState(true);
+  const [status, setStatus] = useState<'pending' | 'approved'>('pending');
+  const [is_blocked, setIsBlocked] = useState<boolean>(false);
+
+  // Funkce, která provede celou logiku načítání a aktualizace stavu
+  const handleAuthStateChange = useCallback(async (currentSession: Session | null) => {
+    const currentUser = currentSession?.user ?? null;
+    
+    setSession(currentSession);
+    setUser(currentUser);
+
+    // Asynchronní volání pro získání role A jména
+    const profileData = await fetchUserProfileData(currentUser);
+    
+    setRole(profileData.role);
+    setFullName(profileData.full_name); // <-- AKTUALIZACE JMENA
+    setStatus(profileData.status);
+    setIsBlocked(profileData.is_blocked);
+    setIsLoading(false);
+  }, []);
 
   useEffect(() => {
-    // 1. Získání počáteční relace a uživatele
+    // Inicializace a posluchač (zůstává stejné)
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setRole(getUserRole(session?.user ?? null));
-      setIsLoading(false);
+      handleAuthStateChange(session);
     });
 
-    // 2. Nastavení posluchače (listeneru) pro změny stavu autentizace
-    // Toto je KLÍČOVÉ pro stabilitu! Supabase se stará o obnovování tokenu a tato funkce
-    // se spustí PŘI KAŽDÉ ZMĚNĚ (přihlášení, odhlášení, vypršení tokenu, obnova).
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setRole(getUserRole(session?.user ?? null));
-        setIsLoading(false);
         console.log('Auth State Changed:', event);
+        handleAuthStateChange(session);
       }
     );
 
-    // 3. Cleanup: Odhlášení posluchače při opuštění komponenty
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
-
+  }, [handleAuthStateChange]); 
+  //console.log('AuthContext State:', { session, user, role, full_name, status, is_blocked, isLoading });
   const value: AuthState = {
     session,
     user,
+    full_name, // <-- EXPORTOVÁNÍ JMENA
     role,
+    status,
+    is_blocked,
     isLoading,
   };
 
-  // Dokud se nenačte počáteční stav, můžeme zobrazit načítací obrazovku
+  // Dokud se nenačte počáteční stav (včetně role a jména), zobrazíme loading
   if (isLoading) {
-    // Nahraďte toto lepším loading spinnerem!
-    return <div className="p-8 text-center text-gray-500">Načítání uživatele...<br /><GridLoader color="#0066ff" /></div>;
+    return <div className="flex items-center justify-center h-screen bg-gray-50"><p className="text-xl text-gray-500">Načítání uživatelského profilu...</p></div>;
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
-// Custom Hook pro snadné použití kontextu
+// Custom Hook (zůstává stejný)
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {

@@ -2,62 +2,59 @@
 
 'use client'; 
 
-import React, { useState, FormEvent, useEffect } from 'react';
-import { supabase } from '@/lib/supabase/client'; // Import klienta Supabase
-import { useAuth } from '@/context/AuthContext'; // Import našeho Auth kontextu
-import { useRouter } from 'next/navigation'; // Pro přesměrování
-import { GridLoader } from 'react-spinners';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { useRouter } from 'next/navigation';
+// import { GridLoader } from 'react-spinners'; // Komentováno, pokud GridLoader způsobuje problém s chybějícím importem
 
 const PrihlaseniPage = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
-  // Získání stavu uživatele z kontextu
   const { user, isLoading: isAuthLoading } = useAuth(); 
   const router = useRouter();
 
-  // Efekt pro přesměrování již přihlášených uživatelů
+  // Efekt pro přesměrování již přihlášených uživatelů (Zůstává stejný)
   useEffect(() => {
-    // Pokud je uživatel přihlášen a kontext je načtený, přesměrujeme ho na jeho portál
     if (!isAuthLoading && user) {
-      router.push('/user-portal/tables'); 
+      router.push('/user-portal/tabulky'); // Zkontrolujte cestu, pokud jste použil /tables
     }
   }, [user, isAuthLoading, router]);
 
-  const handleLogin = async (e: FormEvent) => {
-    e.preventDefault();
+  // --- NOVÁ FUNKCE PRO PŘIHLÁŠENÍ PŘES GOOGLE ---
+  const handleGoogleLogin = async () => {
     setError(null);
     setLoading(true);
 
-    // Volání metody Supabase pro přihlášení
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        // Důležité: Tím se Supabase přesměruje zpět na vaši aplikaci po přihlášení
+        redirectTo: window.location.origin + '/auth/callback', 
+        // Volitelně: Můžete přidat 'access_type: 'offline'' pro získání refresh tokenu
+      },
     });
 
-    setLoading(false);
-
     if (error) {
-      // Zobrazení chyby z Supabase (např. "Invalid login credentials")
-      setError(error.message);
-    } 
-    // Při úspěšném přihlášení se automaticky spustí 'onAuthStateChange' v AuthContextu,
-    // aktualizuje stav a useEffect nahoře uživatele přesměruje.
+      setError(`Chyba při přihlašování přes Google: ${error.message}`);
+      setLoading(false);
+    }
+    // Při úspěchu Supabase automaticky přesměruje uživatele na Google přihlašovací stránku.
+    // Není potřeba ručně nastavovat loading na false, protože uživatel opustí stránku.
   };
-  
-  // Zobrazení načítací obrazovky během ověřování stavu v AuthContextu
+
+  // Zobrazení načítací obrazovky během ověřování stavu v AuthContextu (Zůstává stejný)
   if (isAuthLoading || user) {
     return (
         <div className="flex items-center justify-center h-screen bg-gray-50">
             <p className="text-lg text-gray-600">Ověřování přihlášení a přesměrování...</p>
-            <GridLoader color="#0066ff" />
+            {/* GridLoader color="#0066ff" -- Odkomentujte, pokud máte instalovaný balíček react-spinners */}
         </div>
     );
   }
 
-  // --- HTML formulář ---
+  // --- NOVÉ JSX PRO PŘIHLÁŠENÍ PŘES GOOGLE ---
   return (
     <div className="flex items-center justify-center h-screen bg-gray-50">
       <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
@@ -69,53 +66,22 @@ const PrihlaseniPage = () => {
           </div>
         )}
 
-        <form onSubmit={handleLogin}>
-          <div className="mb-4">
-            <label htmlFor="email" className="block text-gray-700 text-sm font-bold mb-2">
-              Email
-            </label>
-            <input
-              type="email"
-              id="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              placeholder="ridic@mhd-firma.cz"
-              required
-            />
-          </div>
-
-          <div className="mb-6">
-            <label htmlFor="password" className="block text-gray-700 text-sm font-bold mb-2">
-              Heslo
-            </label>
-            <input
-              type="password"
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline"
-              placeholder="********"
-              required
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
+        <div className="space-y-4">
             <button
-              type="submit"
+              onClick={handleGoogleLogin}
               disabled={loading}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:opacity-50"
+              className="w-full flex items-center justify-center bg-white border border-gray-300 text-gray-700 font-semibold py-3 px-4 rounded-lg shadow-sm hover:shadow-md transition disabled:opacity-50"
             >
-              {loading ? 'Přihlašování...' : 'Přihlásit se'}
+              {/* Ikona Google (můžete nahradit skutečnou SVG ikonou) */}
+              <span className="text-xl mr-3">G</span> 
+              {loading ? 'Přesměrování...' : 'Přihlásit se pomocí Google'}
             </button>
-            <a 
-              className="inline-block align-baseline font-bold text-sm text-blue-500 hover:text-blue-800 cursor-pointer"
-              onClick={() => alert('Zatím není implementováno. Obraťte se na administrátora.')} 
-            >
-              Zapomněli jste heslo?
-            </a>
-          </div>
-        </form>
+            
+            <p className="text-center text-sm text-gray-500 pt-2">
+                Přihlášení je dostupné pouze pro autorizované účty.
+            </p>
+        </div>
+
       </div>
     </div>
   );

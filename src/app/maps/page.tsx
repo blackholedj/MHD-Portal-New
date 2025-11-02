@@ -1,36 +1,38 @@
-import Image from "next/image";
+// src/app/maps/page.tsx
 
-// pro Google maps api key: AIzaSyD4X1r8F3o3Y5bJ0KJXb6Z1x7Z2y3A4B5C6D
-// test key: AIzaSyA3B4C5D6E7F8G9H0I1J2K3L4M5N6O7P8Q9R
-// test key restrictions: HTTP referrers (web sites): localhost/*, yourdomain.com/*
-// test key restrictions: API restrictions: Maps JavaScript API, Geocoding API
-// Note: Remember to replace 'yourdomain.com' with your actual domain when deploying.
-// Also, ensure that billing is enabled on your Google Cloud project to use the Maps API.
-// Finally, consider securing your API key further by using environment variables and server-side proxying if necessary.
-//
-// pro pouziti Google Maps pouzit napriklad knihovnu react-leaflet nebo @react-google-maps/api
+import Link from "next/link";
+import { ArrowUpRight } from "lucide-react"; // Importujeme ikonu pro externí odkaz
+
+// Ponecháváme komentáře pro Google Maps jako budoucí referenci, ale NEPOUŽÍVÁME JE TEĎ.
 
 export default function Maps() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            Začneme implementací map pomocí Google Maps API. 
+      <main className="flex w-full max-w-4xl flex-col items-center justify-center py-20 px-8 bg-white dark:bg-black shadow-lg rounded-xl">
+        
+        <div className="flex flex-col items-center gap-6 text-center">
+          <h1 className="text-4xl font-bold tracking-tight text-gray-900 dark:text-zinc-50 mb-4">
+            Mapa polohy vozidel MHD 🚌
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Tato stránka je připravena pro implementaci map pomocí Google Maps API. 
-            Nezapomeňte nahradit testovací API klíč vaším vlastním klíčem a nakonfigurovat
-            potřebná oprávnění a omezení pro bezpečné používání API.
+          
+          <p className="max-w-xl text-lg leading-8 text-zinc-600 dark:text-zinc-400">
+            Z důvodu technických omezení zabezpečení externí mapové služby 
+            **není možné** zobrazit mapu MHD přímo na této stránce. 
+            Kliknutím na tlačítko budete **přesměrováni** na oficiální stránku města Mostu, 
+            kde uvidíte aktuální polohu vozidel.
           </p>
+
+          {/* TLAČÍTKO S PŘÍMÝM ODKAZEM */}
+          <Link
+            href="https://mapy.mesto-most.cz/app/mhd/"
+            target="_blank" // Otevře v novém okně/záložce
+            rel="noopener noreferrer" // Bezpečnostní doporučení
+            className="mt-8 flex items-center bg-blue-600 text-white font-bold py-3 px-8 rounded-lg text-xl shadow-lg hover:bg-blue-700 transition duration-300 transform hover:scale-105"
+          >
+            Zobrazit mapu MHD Most a Litvínov
+            <ArrowUpRight className="w-5 h-5 ml-2" />
+          </Link>
+
         </div>
       </main>
     </div>

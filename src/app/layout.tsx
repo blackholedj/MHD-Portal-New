@@ -1,11 +1,8 @@
-import { AuthProvider } from "@/context/AuthContext"; // import naseho Provideru zabezpeceni pristupu
-import type { Metadata } from "next";
-import "./globals.css";
+// src/app/layout.tsx
 
-export const metadata: Metadata = {
-  title: "Vytvořeno s Next.js 13",
-  description: "Vygenerováno pomocí create next app",
-};
+import { AuthProvider } from '@/context/AuthContext'; 
+import './globals.css'; 
+import Navigace from '@/components/Navigation'; // <-- 1. IMPORTUJTE KOMPONENTU
 
 export default function RootLayout({
   children,
@@ -16,7 +13,16 @@ export default function RootLayout({
     <html lang="cs">
       <body>
         <AuthProvider>
-          {children}
+          
+          {/* 2. VLOŽTE KOMPONENTU NAVIGACE PŘED DĚTI (children) */}
+          {/* Navigace se zobrazí na každé stránce obalené tímto layoutem */}
+          <Navigace /> 
+          
+          {/* 3. children představuje obsah aktuální stránky (např. src/app/page.tsx) */}
+          <main> 
+              {children}
+          </main>
+          
         </AuthProvider>
       </body>
     </html>
