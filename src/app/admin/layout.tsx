@@ -1,9 +1,8 @@
 // src/app/admin/layout.tsx
-
 'use client';
 
 import { useAuth } from '@/context/AuthContext';
-import { useRouter, useSearchParams } from 'next/navigation'; // Import useSearchParams!
+import { useRouter, useSearchParams } from 'next/navigation';
 import React, { useEffect } from 'react';
 import Link from 'next/link';
 
@@ -14,7 +13,7 @@ export default function AdminLayout({
 }) {
   const { role, isLoading } = useAuth();
   const router = useRouter();
-  const searchParams = useSearchParams(); // Získá aktuální URL parametry
+  const searchParams = useSearchParams();
   
   // Získá aktuálně vybranou záložku, defaultně 'jizdni-rady'
   const activeTab = searchParams.get('tab') || 'jizdni-rady'; 
@@ -29,86 +28,61 @@ export default function AdminLayout({
   }, [role, isLoading, router]);
 
   if (isLoading || role !== 'admin') {
-    return <div className="p-10 text-center">Ověřování admin oprávnění...</div>;
+    return <div className="p-10 text-center text-gray-500 dark:text-gray-400">Ověřování admin oprávnění...</div>;
   }
   
-  // Funkce pro získání URL s nastavenou novou záložkou
-  const getTabUrl = (tabName: string) => `/admin/dashboard?tab=${tabName}`;
-  const getTabUrlExt = (tabName: string, extraPath: string) => `/admin/${extraPath}?tab=${tabName}`;
+  // Pomocná funkce pro generování URL pro záložky
+  const getTabUrl = (tabName: string, extraPath?: string) => {
+        if (extraPath) {
+            return `/admin/${extraPath}?tab=${tabName}`;
+        }
+        return `/admin/dashboard?tab=${tabName}`;
+    };
 
-  // Logika AdminDashboardu se přesouvá do children, ale navigace zůstává zde
+    // Definice všech záložek pro snadnější údržbu a mapování
+    const adminTabs = [
+        { name: 'jizdni-rady', label: 'Tabulky 🚆', extraPath: 'dashboard', color: 'blue' },
+        { name: 'dokumenty', label: 'Dokumenty 📃', extraPath: 'dashboard', color: 'green' },
+        { name: 'oznameni', label: 'Oznámení 🔔', extraPath: 'oznameni', color: 'purple' },
+        { name: 'users', label: 'Uživatelé 👤', extraPath: 'users', color: 'red' },
+        { name: 'contact', label: 'Kontaktní zprávy 📬', extraPath: 'contact', color: 'yellow' },
+    ];
+    
   return (
-    <div className="min-h-screen bg-gray-100 p-8">
-      <h1 className="text-4xl font-extrabold mb-8 text-gray-800">
-        🔑 Admin Dashboard
-      </h1>
+    
+    <div className="min-h-screen bg-gray-100 dark:bg-gray-900">
+      {/* HLAVNÍ OBSAH: Zajišťuje max. šířku a centrování v ose X */}
+      <main className="max-w-7xl mx-auto p-4 sm:p-8"> {/* <- KLÍČOVÉ ZMĚNY ZDE: max-w-7xl a mx-auto */}
+        <h1 className="text-3xl sm:text-4xl font-bold mb-6 text-gray-800 dark:text-zinc-50">
+          🔑 Admin Dashboard
+        </h1>
       
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {/* Admin Navigace (Menu) */}
-        <nav className="col-span-1 bg-white p-6 rounded-lg shadow-md h-fit">
-          <h2 className="text-xl font-bold mb-4">Správa</h2>
-          <ul className="space-y-2">
-            
-            <li>
-              <Link 
-                href={getTabUrl('jizdni-rady')} 
-                className={`block p-2 rounded transition ${
-                  activeTab === 'jizdni-rady' 
-                    ? 'bg-blue-100 text-blue-800 font-semibold' 
-                    : 'text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                Nahrát Jízdní řády 🚆
-              </Link>
-            </li>
-            
-            <li>
-              <Link 
-                href={getTabUrl('dokumenty')} 
-                className={`block p-2 rounded transition ${
-                  activeTab === 'dokumenty' 
-                    ? 'bg-green-200 text-green-800 font-semibold' 
-                    : 'text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                Nahrát Dokumenty 📃
-              </Link>
-            </li>
-            
-            <li>
-              <Link 
-                href={getTabUrlExt('users', 'users')}
-                className={`block p-2 rounded transition ${
-                  activeTab === 'users' 
-                    ? 'bg-red-100 text-red-800 font-semibold border-l-4 border-red-500' 
-                    : 'text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                Správa Uživatelských Rolí 👤
-              </Link>
-            </li>
-
-            <li>
-              <Link 
-                href={getTabUrlExt('contact', 'contact')}
-                className={`block p-2 rounded transition ${
-                  activeTab === 'contact' 
-                    ? 'bg-yellow-100 text-yellow-800 font-semibold border-l-4 border-red-500' 
-                    : 'text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                Správa Kontaktních zpráv 📬
-              </Link>
-            </li>
-
-         </ul>
+        {/* Admin Navigace (Záložky) */}
+        <nav className="w-full bg-white dark:bg-zinc-800 p-1 rounded-t-lg shadow-md overflow-x-auto">
+            <div className="flex border-b border-gray-200 dark:border-zinc-700">
+              {adminTabs.map((tab) => (
+                  <Link
+                      key={tab.name}
+                      href={getTabUrl(tab.name, tab.extraPath === 'dashboard' ? undefined : tab.extraPath)}
+                      className={`
+                          py-3 px-4 text-sm font-medium transition-colors duration-200 whitespace-nowrap
+                          ${activeTab === tab.name 
+                              ? `border-b-4 border-${tab.color}-600 dark:border-${tab.color}-400 text-${tab.color}-700 dark:text-${tab.color}-400`
+                              : 'text-gray-600 dark:text-zinc-300 hover:text-gray-900 dark:hover:text-zinc-50 hover:bg-gray-50 dark:hover:bg-zinc-700'
+                          }
+                      `}
+                  >
+                      {tab.label}
+                  </Link>
+              ))}
+            </div>
         </nav>
-        
-        {/* Obsah stránky (dashboard/page.tsx) */}
-        <div className="col-span-3">
+      
+        {/* Obsah stránky (zobrazení záložky) */}
+        <div className="w-full bg-white dark:bg-zinc-800 p-4 sm:p-6 rounded-b-lg shadow-lg min-h-[50vh]">
             {children}
         </div>
-      </div>
+      </main>
     </div>
   );
 }

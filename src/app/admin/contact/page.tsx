@@ -102,10 +102,10 @@ const ContactManager: React.FC = () => {
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-md">
-            <h3 className="text-2xl font-semibold text-gray-800 mb-6 flex items-center">
+            <h2 className="max-w-7xl mx-auto text-2xl font-bold text-gray-800 mb-6 flex items-center dark:text-gray-100 border-b pb-2"> 
                 <Mail className="w-6 h-6 mr-2 text-blue-600" />
                 Kontaktní Zprávy ({submissions.length})
-            </h3>
+            </h2>
 
             {submissions.length === 0 ? (
                 <div className="text-center py-10 text-gray-500">

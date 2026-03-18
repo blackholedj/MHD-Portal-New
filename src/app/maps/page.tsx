@@ -7,13 +7,13 @@ import { ArrowUpRight } from "lucide-react"; // Importujeme ikonu pro externí o
 
 export default function Maps() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex w-full max-w-4xl flex-col items-center justify-center py-20 px-8 bg-white dark:bg-black shadow-lg rounded-xl">
+    <div className="flex min-h-screen items-center justify-center bg-white font-sans dark:bg-gray-900 p-4 sm:p-8">
+      <main className="w-full max-w-4xl flex flex-col items-center justify-center p-6 sm:p-10 md:p-12 bg-white dark:bg-zinc-800 shadow-2xl rounded-2xl">
         
         <div className="flex flex-col items-center gap-6 text-center">
-          <h1 className="text-4xl font-bold tracking-tight text-gray-900 dark:text-zinc-50 mb-4">
+          <h2 className="max-w-4xl mx-auto text-2xl font-bold mb-6 text-gray-800 dark:text-gray-100 border-b pb-2">
             Mapa polohy vozidel MHD 🚌
-          </h1>
+          </h2>
           
           <p className="max-w-xl text-lg leading-8 text-zinc-600 dark:text-zinc-400">
             Z důvodu technických omezení zabezpečení externí mapové služby 

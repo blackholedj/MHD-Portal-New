@@ -32,14 +32,11 @@ const ChatPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 p-4 md:p-8">
-      <h1 className="text-4xl font-extrabold mb-6 text-gray-800 border-b pb-2">Komunikační Kanál (Chat)</h1>
-      <p className="text-lg text-gray-600 mb-6">
-        Prostor pro rychlou komunikaci mezi řidiči a administrátory.
-      </p>
+    <div className="min-h-screen bg-white p-4 md:p-8 sm:p-8 dark:bg-gray-900 ">
+      <h2 className="max-w-4xl mx-auto text-2xl font-bold mb-6 text-gray-800 dark:text-gray-100 border-b pb-2">Chat</h2>
       
       {/* Hlavní chat komponenta */}
-      <div className="max-w-4xl mx-auto h-[70vh] bg-white shadow-xl rounded-xl flex flex-col">
+      <div className="max-w-4xl mx-auto h-[70vh] bg-white shadow-2xl shadow-gray-500 rounded-xl flex flex-col">
         <ChatComponent 
             currentUserId={user.id} 
         />

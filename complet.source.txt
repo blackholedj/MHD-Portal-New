@@ -1,0 +1,4423 @@
+// eslint.config.mjs
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
+
+const eslintConfig = defineConfig([
+...nextVitals,
+...nextTs,
+// Override default ignores of eslint-config-next.
+globalIgnores([
+// Default ignores of eslint-config-next:
+".next/**",
+"out/**",
+"build/**",
+"next-env.d.ts",
+]),
+]);
+
+export default eslintConfig;
+
+// middleware.ts
+
+import { NextResponse, type NextRequest } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
+
+// Cesty, které vyžadují přihlášení (role 'user' nebo 'admin')
+const PROTECTED_PATHS_FOR_USER = [
+'/user-portal',
+'/documents',
+'/chat',
+'/tables'
+];
+
+// Cesty, které vyžadují roli 'admin'
+const PROTECTED_PATHS_FOR_ADMIN = [
+'/admin',
+];
+
+export async function middleware(request: NextRequest) {
+
+    // Vytvoření server klienta pro přístup k relaci (session) přes cookies
+    const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+            cookies: {
+                get: (name) => request.cookies.get(name)?.value,
+                set: (name, value, options) => {
+                    // Middleware vrací upravenou odpověď, která nastavuje cookie
+                    request.cookies.set({ name, value, ...options })
+                },
+                remove: (name, options) => {
+                    request.cookies.set({ name, value: '', ...options })
+                },
+            },
+        }
+    )
+
+    // Získání relace z cookies
+    const { data: { session } } = await supabase.auth.getSession();
+    const pathname = request.nextUrl.pathname;
+
+    // --- LOGIKA PRO PŘESMĚROVÁNÍ ---
+
+    // 1. Ochrana cest pro "user" a "admin"
+    const isProtectedUserPath = PROTECTED_PATHS_FOR_USER.some(path => pathname.startsWith(path));
+
+    if (isProtectedUserPath && !session) {
+        // Uživatel není přihlášen a snaží se dostat na chráněnou cestu
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = '/prihlaseni';
+        // Přidáme původní cestu do URL, aby se po přihlášení mohl vrátit
+        redirectUrl.searchParams.set(`redirectTo`, pathname);
+        return NextResponse.redirect(redirectUrl);
+    }
+
+    // Zde by normálně proběhla kontrola role:
+    // 2. Ochrana cest pro "admin" (Vyžaduje načtení role z DB)
+
+    if (session) {
+        // Zde byste volali Supabase DB pro získání role uživatele:
+         const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+         const userRole = profile?.role; // 'user' nebo 'admin'
+
+        const isAdminPath = PROTECTED_PATHS_FOR_ADMIN.some(path => pathname.startsWith(path));
+
+        if (isAdminPath && userRole !== 'admin') {
+            // Uživatel je přihlášen, ale nemá roli 'admin' pro cestu /admin
+            const redirectUrl = request.nextUrl.clone();
+            redirectUrl.pathname = '/'; // Přesměrování na úvod
+            return NextResponse.redirect(redirectUrl);
+        }
+    }
+
+
+    // 3. Přihlášený uživatel na stránce /prihlaseni
+    if (session && pathname === '/prihlaseni') {
+        // Přihlášeného uživatele posíláme pryč z přihlašovací stránky
+        const redirectUrl = request.nextUrl.clone();
+        // Vracíme ho tam, odkud přišel, nebo na domovskou stránku portálu
+        redirectUrl.pathname = request.nextUrl.searchParams.get('redirectTo') || '/user-portal/dokumenty';
+        redirectUrl.searchParams.delete('redirectTo');
+        return NextResponse.redirect(redirectUrl);
+    }
+
+    // Pokračování na požadovanou cestu
+    return NextResponse.next();
+
+}
+
+// Konfigurace: Middleware se spustí pouze pro tyto cesty (včetně API Routes)
+export const config = {
+matcher: [
+/*
+* Všechny cesty kromě:
+* - _next/static (statické soubory)
+* - _next/image (Next.js obrázky)
+* - favicon.ico (favicon)
+* - Veřejné assety
+* - Kořenové cesty, které nemusí být chráněné (např. úvod, kontakt)
+*/
+'/((?!_next/static|_next/image|favicon.ico|manifest.json|prihlaseni|kontakt|o-aplikaci|mapa).*)',
+],
+};
+
+# netlify.toml
+
+[build]
+command = "npm run build"
+publish = ".next"
+
+[functions]
+node_bundler = "esbuild"
+
+// next.env.d.ts
+/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+import "./.next/types/routes.d.ts";
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+
+// next.config.ts
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+/_ config options here _/
+reactCompiler: true,
+};
+
+module.exports = {
+allowedDevOrigins: ['local-origin.dev', '*.local-origin.dev'],
+images: {
+remotePatterns: [new URL('https://abfuprplwnftsvichild.supabase.co/storage/v1/object/public/**')],
+},
+
+};
+
+export default nextConfig;
+
+// about
+import Image from "next/image";
+import { MessageCircle, File, MapPin, Table } from "lucide-react";
+
+export default function About() {
+const Feature = ({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) => (
+<div className="flex flex-col items-center text-center p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-300">
+<div className="text-blue-500 mb-4">{icon}</div>
+<h3 className="text-xl font-semibold mb-2 text-gray-800">{title}</h3>
+<p className="text-gray-600">{children}</p>
+</div>
+);
+return (
+<div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black flex-col p-8">
+<main className="flex w-full max-w-4xl flex-col items-center justify-center py-20 px-8 bg-white dark:bg-black shadow-lg rounded-xl">
+
+      <h1 className="text-4xl font-bold tracking-tight text-gray-900 dark:text-zinc-50 mb-4">
+        O aplikaci MHD Portál
+      </h1>
+      <p className="max-w-xl text-lg leading-8 text-zinc-600 dark:text-zinc-400 text-center">
+        MHD Portál je moderní webová platforma navržená speciálně pro řidiče
+        autobusů a tramvají. Naším cílem je zjednodušit přístup k důležitým
+        informacím, usnadnit komunikaci a poskytnout všechny potřebné nástroje
+        na jednom místě.
+      </p>
+
+      <div className="space-y-8">
+        <h2 className=" font-bold text-center m-6 text-gray-800">
+          Klíčové funkce
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <Feature icon={<MessageCircle size={25} />} title="Nástěnka (Chat)">
+            Rychlá a jednoduchá komunikace s kolegy. Sdílejte důležité
+            informace, vzkazy a postřehy z provozu v reálném čase.
+          </Feature>
+          <Feature icon={<File size={25} />} title="Správa dokumentů">
+            Všechny důležité manuály, příručky, směrnice a tabulky bezpečně
+            uložené a dostupné kdykoliv ke stažení.
+          </Feature>
+          <Feature icon={<Table size={25} />} title="Tabulky">
+            Fotogalérie provozních tabulek pro řidiče MHD.
+          </Feature>
+          <Feature
+            icon={<MapPin size={25} />}
+            title="Interaktivní mapa"
+          >
+            Přehledná mapa všech zastávek a linek s detailními informacemi po
+            kliknutí.
+          </Feature>
+        </div>
+      </div>
+      </main>
+    </div>
+
+);
+}
+
+// src/app/admin/contact/page.tsx
+'use client';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { Mail, Trash2, Eye, EyeOff, Loader2, CheckCircle, XCircle } from 'lucide-react';
+
+// Typ pro jednu zprávu z tabulky contact_submissions
+interface Submission {
+id: string;
+name: string;
+email: string;
+message: string;
+visible: boolean;
+created_at: string;
+}
+
+const ContactManager: React.FC = () => {
+const [submissions, setSubmissions] = useState<Submission[]>([]);
+const [isLoading, setIsLoading] = useState(true);
+const [error, setError] = useState<string | null>(null);
+
+    const fetchSubmissions = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+
+        // Načteme všechny zprávy, nejnovější první
+        const { data, error } = await supabase
+            .from('contact_form')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('Chyba při načítání zpráv:', error);
+            setError('Nepodařilo se načíst zprávy. Zkontrolujte RLS politiky (SELECT pro admina).');
+            setSubmissions([]);
+        } else {
+            setSubmissions(data || []);
+        }
+        setIsLoading(false);
+    }, []);
+
+    // Načtení dat při prvním renderu
+    useEffect(() => {
+        fetchSubmissions();
+    }, [fetchSubmissions]);
+
+    // --- MANIPULAČNÍ FUNKCE ---
+
+    const toggleReadStatus = async (id: string, currentStatus: boolean) => {
+        const newStatus = !currentStatus;
+
+        // Optimistická aktualizace UI
+        setSubmissions(prev =>
+            prev.map(sub => sub.id === id ? { ...sub, visible: newStatus } : sub)
+        );
+
+        const { error } = await supabase
+            .from('contact_form')
+            .update({ visible: newStatus })
+            .eq('id', id);
+
+        if (error) {
+            console.error('Chyba při změně statusu:', error);
+            // V případě chyby vrátit stav zpět
+            setSubmissions(prev =>
+                prev.map(sub => sub.id === id ? { ...sub, visible: currentStatus } : sub)
+            );
+            alert('Chyba při aktualizaci statusu: ' + error.message);
+        }
+    };
+
+    const deleteSubmission = async (id: string) => {
+        if (!confirm('Opravdu chcete tuto kontaktní zprávu smazat?')) {
+            return;
+        }
+
+        const originalSubmissions = submissions;
+
+        // Optimistická aktualizace UI
+        setSubmissions(prev => prev.filter(sub => sub.id !== id));
+
+        const { error } = await supabase
+            .from('contact_form')
+            .delete()
+            .eq('id', id);
+
+        if (error) {
+            console.error('Chyba při mazání zprávy:', error);
+            setSubmissions(originalSubmissions); // Vrátit zprávy v případě chyby
+            alert('Chyba při mazání zprávy: ' + error.message);
+        }
+    };
+
+    if (isLoading) {
+        return <div className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500" /> Načítám zprávy...</div>;
+    }
+
+    if (error) {
+        return <div className="p-8 text-red-600 border border-red-300 bg-red-50 rounded-lg">Chyba: {error}</div>;
+    }
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h2 className="max-w-7xl mx-auto text-2xl font-bold text-gray-800 mb-6 flex items-center dark:text-gray-100 border-b pb-2">
+                <Mail className="w-6 h-6 mr-2 text-blue-600" />
+                Kontaktní Zprávy ({submissions.length})
+            </h2>
+
+            {submissions.length === 0 ? (
+                <div className="text-center py-10 text-gray-500">
+                    <CheckCircle className="w-10 h-10 mx-auto text-green-500 mb-3" />
+                    Všechny zprávy jsou vyřízeny. Vypadá to tu čistě!
+                </div>
+            ) : (
+                <div className="space-y-4">
+                    {submissions.map((sub) => (
+                        <div
+                            key={sub.id}
+                            className={`p-4 border rounded-lg transition duration-200 ${
+                                sub.visible ? 'bg-gray-100 border-gray-200 opacity-80' : 'bg-yellow-50 border-yellow-300 font-medium'
+                            }`}
+                        >
+                            <div className="flex justify-between items-start mb-2">
+                                <div>
+                                    <p className="text-lg text-gray-900">
+                                        Od: <span className="font-bold">{sub.name}</span>
+                                    </p>
+                                    <p className="text-sm text-gray-600">
+                                        <a href={`mailto:${sub.email}`} className="hover:underline">{sub.email}</a>
+                                        {' | '}
+                                        <span title="Čas odeslání">
+                                            {new Date(sub.created_at).toLocaleString('cs-CZ')}
+                                        </span>
+                                    </p>
+                                </div>
+                                <div className="flex space-x-2 flex-shrink-0">
+                                    <button
+                                        onClick={() => toggleReadStatus(sub.id, sub.visible)}
+                                        className={`p-2 rounded-full transition duration-150 ${
+                                            sub.visible ? 'text-gray-500 hover:bg-gray-200' : 'text-blue-600 hover:bg-blue-100'
+                                        }`}
+                                        title={sub.visible ? 'Označit jako nepřečtené' : 'Označit jako přečtené'}
+                                    >
+                                        {sub.visible ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                                    </button>
+                                    <button
+                                        onClick={() => deleteSubmission(sub.id)}
+                                        className="p-2 rounded-full text-red-500 hover:bg-red-100 transition duration-150"
+                                        title="Smazat zprávu"
+                                    >
+                                        <Trash2 className="w-5 h-5" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className={`mt-3 pt-3 border-t ${sub.visible ? 'border-gray-300' : 'border-yellow-400'}`}>
+                                <p className="whitespace-pre-wrap text-gray-700">{sub.message}</p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+
+};
+
+export default ContactManager;
+
+// src/app/admin/dashboard/DocumentUploadForm.tsx
+
+'use client';
+
+import React, { useState, FormEvent } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { v4 as uuidv4 } from 'uuid';
+
+type DocumentType = 'smernice' | 'manualy' | 'jine';
+
+const DocumentUploadForm = () => {
+const { user } = useAuth();
+
+// Stavy pro formulářová pole
+const [title, setTitle] = useState('');
+const [description, setDescription] = useState('');
+const [type, setType] = useState<DocumentType>('jine'); // <-- NOVÝ STAV s výchozí hodnotou
+const [adminOnly, setAdminOnly] = useState(false);
+const [file, setFile] = useState<File | null>(null);
+
+// Stavy pro zpětnou vazbu
+const [loading, setLoading] = useState(false);
+const [success, setSuccess] = useState<string | null>(null);
+const [error, setError] = useState<string | null>(null);
+
+const BUCKET_NAME = 'documents';
+
+const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+setFile(e.target.files ? e.target.files[0] : null);
+setSuccess(null);
+setError(null);
+};
+
+const handleSubmit = async (e: FormEvent) => {
+e.preventDefault();
+// Kontrolujeme, zda je vyplněn titul a vybrán soubor (type má default)
+if (!user || !file || !title) {
+setError('Vyplňte název a vyberte soubor.');
+return;
+}
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    // 1. Nahrání souboru do Supabase Storage
+    const fileExtension = file.name.split('.').pop();
+    // Vytvoříme cestu: documents/typ/uuid.pdf
+    const filePath = `${type}-${file.name}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(BUCKET_NAME)
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (uploadError) {
+      setError(`Chyba při nahrávání souboru: ${uploadError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    // 2. Uložení metadat do databáze (tabulka: documents)
+    const { error: dbError } = await supabase
+      .from('documents')
+      .insert({
+        title,
+        description,
+        type, // <-- UKLÁDÁNÍ NOVÉHO DATUM
+        file_path: filePath,
+        admin_only: adminOnly,
+      });
+
+    if (dbError) {
+        // Soubor byl nahrán, ale metadata se nepodařilo uložit.
+        // V profesionálním prostředí by zde mělo následovat smazání souboru ze Storage.
+        setError(`Soubor byl nahrán, ale metadata se nepodařilo uložit: ${dbError.message}.`);
+    } else {
+        setSuccess(`Dokument "${title}" (Typ: ${type.toUpperCase()}) byl úspěšně nahrán a publikován.`);
+        // Vyčištění formuláře
+        setTitle('');
+        setDescription('');
+        setType('jine');
+        setAdminOnly(false);
+        setFile(null);
+    }
+
+    setLoading(false);
+
+};
+
+return (
+<div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
+<h3 className="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">Nahrát nový Dokument</h3>
+<form onSubmit={handleSubmit} className="space-y-6">
+{success && <div className="bg-green-100 text-green-700 p-3 rounded font-medium">{success}</div>}
+{error && <div className="bg-red-100 text-red-700 p-3 rounded font-medium">{error}</div>}
+
+        {/* Název Dokumentu */}
+        <div>
+          <label htmlFor="title" className="block text-sm font-medium text-gray-700">Název Dokumentu (Povinné)</label>
+          <input
+            type="text"
+            id="title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:border-blue-500 focus:ring-blue-500"
+            required
+          />
+        </div>
+
+        {/* Popis */}
+        <div>
+          <label htmlFor="description" className="block text-sm font-medium text-gray-700">Popis</label>
+          <textarea
+            id="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:border-blue-500 focus:ring-blue-500"
+            rows={2}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Typ Dokumentu (NOVÉ POLE) */}
+            <div>
+                <label htmlFor="docType" className="block text-sm font-medium text-gray-700">Typ Dokumentu</label>
+                <select
+                    id="docType"
+                    value={type}
+                    onChange={(e) => setType(e.target.value as DocumentType)}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:border-blue-500 focus:ring-blue-500"
+                >
+                    <option value="smernice">Směrnice</option>
+                    <option value="manualy">Manuály (Zařízení, Vozidla)</option>
+                    <option value="jine">Jiné dokumenty</option>
+                </select>
+            </div>
+
+            {/* Omezení přístupu (Původní pole) */}
+            <div className="flex items-end pb-2">
+                <input
+                type="checkbox"
+                id="adminOnly"
+                checked={adminOnly}
+                onChange={(e) => setAdminOnly(e.target.checked)}
+                className="h-4 w-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
+                />
+                <label htmlFor="adminOnly" className="ml-2 block text-sm font-medium text-gray-700">
+                Pouze pro Adminy (Řidiči dokument neuvidí)
+                </label>
+            </div>
+        </div>
+
+
+        {/* Výběr Souboru */}
+        <div>
+          <label htmlFor="file" className="block text-sm font-medium text-gray-700">Vyberte soubor (PDF, DOCX, JPG)</label>
+          <input
+            type="file"
+            id="file"
+            onChange={handleFileChange}
+            className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+            required
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading || !file || !title}
+          className="w-full bg-green-600 text-white py-3 px-4 rounded-md shadow-lg hover:bg-green-700 disabled:opacity-50 font-bold"
+        >
+          {loading ? 'Nahrávám dokument a ukládám...' : 'Nahrát Dokument'}
+        </button>
+      </form>
+    </div>
+
+);
+};
+
+export default DocumentUploadForm;
+
+// src/app/admin/dashboard/JizdniRadUploadForm.tsx
+
+'use client';
+
+import React, { useState, FormEvent } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { v4 as uuidv4 } from 'uuid';
+
+type TransportType = 'autobus' | 'tramvaj';
+type DayType = 'pracovni' | 'vikend';
+type PartOfDay = 'ranni' | 'odpoledni'; // Zachováme pro interní logiku vkládání
+
+const JizdniRadUploadForm = () => {
+const { user } = useAuth();
+
+const [lineNumber, setLineNumber] = useState('');
+const [courseNumber, setCourseNumber] = useState('');
+const [transportType, setTransportType] = useState<TransportType>('autobus');
+const [dayType, setDayType] = useState<DayType>('pracovni');
+
+// NOVÉ: Dva samostatné stavy pro soubory
+const [ranniFile, setRanniFile] = useState<File | null>(null);
+const [odpoledniFile, setOdpoledniFile] = useState<File | null>(null);
+
+const [loading, setLoading] = useState(false);
+const [success, setSuccess] = useState<string | null>(null);
+const [error, setError] = useState<string | null>(null);
+
+const BUCKET_NAME = 'jizdni-rady';
+
+const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, setFile: React.Dispatch<React.SetStateAction<File | null>>) => {
+setFile(e.target.files ? e.target.files[0] : null);
+setSuccess(null);
+setError(null);
+};
+
+// Pomocná funkce pro nahrání jednoho souboru a uložení záznamu
+const uploadAndInsert = async (file: File, partOfDay: PartOfDay, line: string, course: string, type: TransportType, day: DayType) => {
+const fileExtension = file.name.split('.').pop();
+// Cesta: jizdni-rady/linka/kurz/ranni-pracovni/uuid.pdf
+const filePath = `${line}/${course}/${partOfDay}-${day}/${uuidv4()}.${fileExtension}`;
+
+    // 1. Nahrání souboru do Supabase Storage
+    const { error: uploadError } = await supabase.storage
+      .from(BUCKET_NAME)
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+    if (uploadError) {
+      throw new Error(`Chyba při nahrávání souboru (${partOfDay}): ${uploadError.message}`);
+    }
+
+    // 2. Uložení metadat do databáze
+    const { error: dbError } = await supabase
+      .from('jizdni_rady')
+      .insert({
+        line_number: line,
+        course_number: course,
+        transport_type: type,
+        day_type: day,
+        part_of_day: partOfDay, // ZDE je klíčové
+        image_url: supabase.storage.from(BUCKET_NAME).getPublicUrl(filePath).data.publicUrl,
+      });
+
+    if (dbError) {
+        throw new Error(`Soubor byl nahrán, ale metadata (${partOfDay}) se nepodařilo uložit: ${dbError.message}`);
+    }
+
+};
+
+const handleSubmit = async (e: FormEvent) => {
+e.preventDefault();
+if (!user || !lineNumber || !courseNumber || (!ranniFile && !odpoledniFile)) {
+setError('Vyplňte číslo linky, číslo kurzu a nahrajte alespoň jeden jízdní řád (ranní nebo odpolední).');
+return;
+}
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    let uploadedCount = 0;
+
+    try {
+        // A. Zpracování RANNÍ ČÁSTI
+        if (ranniFile) {
+            await uploadAndInsert(ranniFile, 'ranni', lineNumber, courseNumber, transportType, dayType);
+            uploadedCount++;
+        }
+
+        // B. Zpracování ODPOLEDNÍ ČÁSTI
+        if (odpoledniFile) {
+            await uploadAndInsert(odpoledniFile, 'odpoledni', lineNumber, courseNumber, transportType, dayType);
+            uploadedCount++;
+        }
+
+        if (uploadedCount > 0) {
+            setSuccess(`Úspěšně nahráno ${uploadedCount} jízdních řádů pro Linku ${lineNumber}, Kurz ${courseNumber}.`);
+            // Vyčištění formuláře
+            setLineNumber('');
+            setCourseNumber('');
+            setRanniFile(null);
+            setOdpoledniFile(null);
+        } else {
+             // Tato větev by neměla nastat díky počáteční kontrole, ale pro jistotu:
+             setError('Nebyly vybrány žádné soubory k nahrání.');
+        }
+
+    } catch (err: any) {
+        setError(err.message);
+    }
+
+    setLoading(false);
+
+};
+
+return (
+<div className="bg-white p-6 rounded-lg shadow-md border border-blue-100">
+<h3 className="text-2xl font-bold mb-4 text-blue-800 border-b pb-2">Nahrát nový Jízdní Řád</h3>
+<form onSubmit={handleSubmit} className="space-y-6">
+{success && <div className="bg-green-100 text-green-700 p-3 rounded font-medium">{success}</div>}
+{error && <div className="bg-red-100 text-red-700 p-3 rounded font-medium">{error}</div>}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Číslo linky */}
+            <div>
+                <label htmlFor="lineNumber" className="block text-sm font-medium text-gray-700">Číslo Kurzu</label>
+                <input
+                    type="text"
+                    id="lineNumber"
+                    value={lineNumber}
+                    onChange={(e) => setLineNumber(e.target.value)}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                    placeholder="3"
+                    required
+                />
+            </div>
+
+            {/* Číslo kurzu */}
+            <div>
+                <label htmlFor="courseNumber" className="block text-sm font-medium text-gray-700">Číslo Linky</label>
+                <input
+                    type="text"
+                    id="courseNumber"
+                    value={courseNumber}
+                    onChange={(e) => setCourseNumber(e.target.value)}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                    placeholder="101"
+                    required
+                />
+            </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Typ Dopravy */}
+            <div>
+                <label htmlFor="transportType" className="block text-sm font-medium text-gray-700">Typ Dopravy</label>
+                <select
+                    id="transportType"
+                    value={transportType}
+                    onChange={(e) => setTransportType(e.target.value as TransportType)}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                >
+                    <option value="autobus">Autobus 🚌</option>
+                    <option value="tramvaj">Tramvaj 🚋</option>
+                </select>
+            </div>
+
+            {/* Dny Provozu */}
+            <div>
+                <label htmlFor="dayType" className="block text-sm font-medium text-gray-700">Dny Provozu</label>
+                <select
+                    id="dayType"
+                    value={dayType}
+                    onChange={(e) => setDayType(e.target.value as DayType)}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                >
+                    <option value="pracovni">Pracovní dny</option>
+                    <option value="vikend">Víkend</option>
+                </select>
+            </div>
+        </div>
+
+        {/* NOVÉ: Dva souborové vstupy */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border p-4 rounded-md bg-gray-50">
+            {/* Ranní Část */}
+            <div>
+                <label htmlFor="ranniFile" className="block text-sm font-bold text-gray-700 mb-2">1. Jízdní Řád - RANNÍ ČÁST (volitelné)</label>
+                <input
+                    type="file"
+                    id="ranniFile"
+                    onChange={(e) => handleFileChange(e, setRanniFile)}
+                    className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                />
+            </div>
+
+            {/* Odpolední Část */}
+            <div>
+                <label htmlFor="odpoledniFile" className="block text-sm font-bold text-gray-700 mb-2">2. Jízdní Řád - ODPOLEDNÍ ČÁST (volitelné)</label>
+                <input
+                    type="file"
+                    id="odpoledniFile"
+                    onChange={(e) => handleFileChange(e, setOdpoledniFile)}
+                    className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                />
+            </div>
+        </div>
+
+        <p className='text-sm text-gray-600 pt-2'>Poznámka: Musíte nahrát alespoň jeden soubor (ranní nebo odpolední). Pokud nahrajete oba, vytvoří se dva záznamy v databázi.</p>
+
+
+        <button
+          type="submit"
+          disabled={loading || !lineNumber || !courseNumber || (!ranniFile && !odpoledniFile)}
+          className="w-full bg-blue-600 text-white py-3 px-4 rounded-md shadow-lg hover:bg-blue-700 disabled:opacity-50 font-bold"
+        >
+          {loading ? 'Nahrávám JŘ a ukládám metadata...' : 'Nahrát Jízdní Řád(y)'}
+        </button>
+      </form>
+    </div>
+
+);
+};
+
+export default JizdniRadUploadForm;
+
+// src/app/admin/dashboard/page.tsx
+
+'use client';
+
+import React from 'react';
+import { useSearchParams } from 'next/navigation'; // Import useSearchParams!
+import DocumentUploadForm from './DocumentUploadForm'; // Předpokládáme, že je soubor vedle
+import JizdniRadUploadForm from './JizdniRadUploadForm'; // Předpokládáme, že je soubor vedle
+
+const AdminDashboardPage = () => {
+const searchParams = useSearchParams();
+// Čteme parametr 'tab' z URL, defaultní hodnota je 'jizdni-rady'
+const activeTab = searchParams.get('tab') || 'jizdni-rady';
+
+    // Umožňuje zobrazení správného názvu záložky
+    const tabTitle = activeTab === 'dokumenty' ? 'Dokumenty' : 'Jízdní řády';
+
+    // Obsah k zobrazení
+    let content;
+    if (activeTab === 'dokumenty') {
+        content = <DocumentUploadForm />;
+    } else {
+        // Defaultně nebo pokud je 'jizdni-rady'
+        content = <JizdniRadUploadForm />;
+    }
+
+    return (
+        <div className="space-y-8 bg-white">
+            <h2 className="max-w-7xl mx-auto text-2xl font-bold mb-3 text-gray-800 dark:text-gray-100 border-b pb-2 pt-2">
+                Správa souborů: {tabTitle}
+            </h2>
+
+            {/* Navigace záložkami (v layoutu) automaticky změní URL,
+                a tato komponenta se překreslí, když se URL změní. */}
+
+            {/* Zde se vykreslí vybraný formulář */}
+            {content}
+
+            {/* Nyní již nepotřebujeme lokální přepínače záložek */}
+        </div>
+    );
+
+};
+
+export default AdminDashboardPage;
+
+// src/components/Admin/AdminAnnouncementManager.tsx
+'use client';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase/client'; // Předpokládá se existující Supabase klienta
+import { Plus, Edit, Trash2, Loader2, XCircle } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext'; // Předpokládá se existující AuthContext
+
+// --- TYPY DAT ---
+interface Announcement {
+id: string;
+title: string;
+content: string;
+is_active: boolean;
+priority: number;
+target_role: 'all' | 'admin' | 'user';
+created_at: string;
+}
+
+// --- KOMPONENTA MODALU PRO PŘIDÁNÍ/EDITACI ---
+interface AnnouncementModalProps {
+isOpen: boolean;
+onClose: () => void;
+initialData: Announcement | null; // null pro přidání, data pro editaci
+onSaveSuccess: () => void;
+}
+
+const AnnouncementModal: React.FC<AnnouncementModalProps> = ({ isOpen, onClose, initialData, onSaveSuccess }) => {
+const [formData, setFormData] = useState<Omit<Announcement, 'id' | 'created_at'>>({
+title: '',
+content: '',
+is_active: true,
+priority: 1,
+target_role: 'all',
+});
+const [isSaving, setIsSaving] = useState(false);
+const [error, setError] = useState<string | null>(null);
+
+    // Načtení dat při otevření modalu pro editaci
+    useEffect(() => {
+        if (initialData) {
+            setFormData({
+                title: initialData.title,
+                content: initialData.content,
+                is_active: initialData.is_active,
+                priority: initialData.priority,
+                target_role: initialData.target_role,
+            });
+        } else {
+            // Reset pro přidání nového
+            setFormData({ title: '', content: '', is_active: true, priority: 1, target_role: 'all' });
+        }
+        setError(null);
+    }, [initialData]);
+
+    if (!isOpen) return null;
+
+    const handleSave = async () => {
+        if (!formData.title || !formData.content) {
+            setError('Titulek a obsah nesmí být prázdné.');
+            return;
+        }
+
+        setIsSaving(true);
+        setError(null);
+
+        try {
+            if (initialData) {
+                // EDITACE EXISTUJÍCÍHO
+                const { error: updateError } = await supabase
+                    .from('portal_announcements')
+                    .update(formData)
+                    .eq('id', initialData.id);
+
+                if (updateError) throw updateError;
+            } else {
+                // PŘIDÁNÍ NOVÉHO
+                const { error: insertError } = await supabase
+                    .from('portal_announcements')
+                    .insert(formData);
+
+                if (insertError) throw insertError;
+            }
+
+            onSaveSuccess();
+            onClose();
+
+        } catch (err: any) {
+            console.error('Chyba při ukládání oznámení:', err);
+            setError(`Chyba: ${err.message || 'Nepodařilo se uložit oznámení.'}`);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm p-4"
+            onClick={onClose}
+        >
+            <div
+                className="bg-white dark:bg-zinc-800 p-6 rounded-xl shadow-2xl max-w-lg w-full transform transition-all duration-300"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <h2 className="text-2xl font-bold mb-6 text-blue-600 dark:text-blue-300">
+                    {initialData ? 'Editovat' : 'Vytvořit Nové'} Oznámení
+                </h2>
+
+                <div className="space-y-4">
+
+                    {/* Titulek */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Titulek</label>
+                        <input
+                            type="text"
+                            value={formData.title}
+                            onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                            className="mt-1 block w-full p-2 border border-gray-300 rounded-md dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-100"
+                            disabled={isSaving}
+                        />
+                    </div>
+
+                    {/* Obsah */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Obsah (podporuje jednoduché formátování)</label>
+                        <textarea
+                            value={formData.content}
+                            onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
+                            rows={4}
+                            className="mt-1 block w-full p-2 border border-gray-300 rounded-md dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-100"
+                            disabled={isSaving}
+                        />
+                    </div>
+
+                    {/* Priorita a Cílová role */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Priorita (1 = nejvyšší)</label>
+                            <input
+                                type="number"
+                                value={formData.priority}
+                                onChange={(e) => setFormData(prev => ({ ...prev, priority: parseInt(e.target.value) || 1 }))}
+                                min="1"
+                                className="mt-1 block w-full p-2 border border-gray-300 rounded-md dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-100"
+                                disabled={isSaving}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Cílová Role</label>
+                            <select
+                                value={formData.target_role}
+                                onChange={(e) => setFormData(prev => ({ ...prev, target_role: e.target.value as 'all' | 'admin' | 'user' }))}
+                                className="mt-1 block w-full p-2 border border-gray-300 rounded-md dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-100"
+                                disabled={isSaving}
+                            >
+                                <option value="all">Všichni</option>
+                                <option value="user">Pouze Schválení Uživatelé</option>
+                                <option value="admin">Pouze Admini</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {/* Aktivní stav */}
+                    <div className="flex items-center">
+                        <input
+                            id="is_active"
+                            type="checkbox"
+                            checked={formData.is_active}
+                            onChange={(e) => setFormData(prev => ({ ...prev, is_active: e.target.checked }))}
+                            className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:bg-zinc-700 dark:border-zinc-600"
+                            disabled={isSaving}
+                        />
+                        <label htmlFor="is_active" className="ml-2 block text-sm font-medium text-gray-700 dark:text-zinc-300">
+                            Aktivní (Viditelné pro uživatele)
+                        </label>
+                    </div>
+                </div>
+
+                {/* Zpráva o chybě */}
+                {error && (
+                    <div className="mt-4 p-3 flex items-center bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 rounded-lg text-sm">
+                        <XCircle size={18} className="mr-2" /> {error}
+                    </div>
+                )}
+
+                {/* Tlačítka */}
+                <div className="mt-6 flex justify-end space-x-3">
+                    <button
+                        onClick={onClose}
+                        className="px-4 py-2 bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-100 rounded-lg hover:bg-gray-300 dark:hover:bg-zinc-600 transition disabled:opacity-50"
+                        disabled={isSaving}
+                    >
+                        Zavřít
+                    </button>
+                    <button
+                        onClick={handleSave}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center"
+                        disabled={isSaving}
+                    >
+                        {isSaving ? (
+                            <>
+                                <Loader2 size={18} className="animate-spin mr-2" /> Ukládám...
+                            </>
+                        ) : 'Uložit Oznámení'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+
+};
+
+// ======================================================================
+// === HLAVNÍ KOMPONENTA PRO SPRÁVU OZNÁMENÍ ===
+// ======================================================================
+
+const AdminAnnouncementManager: React.FC = () => {
+const { role } = useAuth();
+const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+const [isLoading, setIsLoading] = useState(true);
+const [error, setError] = useState<string | null>(null);
+
+    // Stav pro modal
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingData, setEditingData] = useState<Announcement | null>(null);
+
+    // Načtení oznámení
+    const fetchAnnouncements = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+
+        // Zde by měla být kontrola, zda je uživatel admin.
+        if (role !== 'admin') {
+            setError('Přístup odepřen: Musíte být administrátor.');
+            setIsLoading(false);
+            return;
+        }
+
+        const { data, error: fetchError } = await supabase
+            .from('portal_announcements')
+            .select('*')
+            .order('priority', { ascending: true })
+            .order('created_at', { ascending: false });
+
+        if (fetchError) {
+            console.error('Chyba při načítání oznámení:', fetchError);
+            setError('Nepodařilo se načíst oznámení.');
+            setAnnouncements([]);
+        } else {
+            setAnnouncements(data || []);
+        }
+        setIsLoading(false);
+    }, [role]);
+
+    useEffect(() => {
+        fetchAnnouncements();
+    }, [fetchAnnouncements]);
+
+    // Otevření modalu pro editaci
+    const handleEdit = (announcement: Announcement) => {
+        setEditingData(announcement);
+        setIsModalOpen(true);
+    };
+
+    // Otevření modalu pro nové oznámení
+    const handleAdd = () => {
+        setEditingData(null);
+        setIsModalOpen(true);
+    };
+
+    // Smazání
+    const handleDelete = async (id: string) => {
+        if (!window.confirm('Opravdu chcete toto oznámení trvale smazat?')) return;
+
+        setIsLoading(true);
+        try {
+            // Smazání samotného oznámení
+            const { error: deleteAnnounceError } = await supabase
+                .from('portal_announcements')
+                .delete()
+                .eq('id', id);
+
+            if (deleteAnnounceError) throw deleteAnnounceError;
+
+            // OPTIONAL: Smazání všech záznamů o přečtení pro toto oznámení
+            // Supabase Cascade Delete by se mělo postarat o smazání záznamů z 'user_announcement_reads'
+
+            await fetchAnnouncements(); // Obnovení seznamu
+
+        } catch (err: any) {
+            setError(`Chyba při mazání: ${err.message || 'Nepodařilo se smazat.'}`);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+
+    if (role !== 'admin') {
+        return <div className="p-6 text-red-500">Administrátorská sekce. Přístup odepřen.</div>;
+    }
+
+    return (
+        <div className="bg-white dark:bg-zinc-800 p-4 sm:p-6 rounded-xl shadow-lg">
+            <header className="flex justify-between items-center mb-6 border-b pb-3 dark:border-zinc-700">
+                <h3 className="text-2xl font-bold text-gray-800 dark:text-zinc-50">
+                    Správa Oznámení
+                </h3>
+                <button
+                    onClick={handleAdd}
+                    className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700 transition disabled:opacity-50"
+                    disabled={isLoading}
+                >
+                    <Plus size={20} className="mr-2" /> Nové Oznámení
+                </button>
+            </header>
+
+            {isLoading ? (
+                <div className="flex justify-center py-10">
+                    <Loader2 size={32} className="animate-spin text-blue-500" />
+                </div>
+            ) : error ? (
+                <div className="p-4 bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 rounded-lg">{error}</div>
+            ) : (
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 dark:divide-zinc-700">
+                        <thead className="bg-gray-50 dark:bg-zinc-700">
+                            <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-zinc-300 uppercase tracking-wider">Priorita</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-zinc-300 uppercase tracking-wider">Titulek</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-zinc-300 uppercase tracking-wider">Cíl</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-zinc-300 uppercase tracking-wider">Aktivní</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-zinc-300 uppercase tracking-wider">Akce</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white dark:bg-zinc-800 divide-y divide-gray-200 dark:divide-zinc-700">
+                            {announcements.map((announcement) => (
+                                <tr key={announcement.id} className="hover:bg-gray-50 dark:hover:bg-zinc-700/50 transition-colors">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-zinc-50">{announcement.priority}</td>
+                                    <td className="px-6 py-4 text-sm text-gray-700 dark:text-zinc-200 font-semibold max-w-xs truncate" title={announcement.content}>
+                                        {announcement.title}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-zinc-200">{announcement.target_role.toUpperCase()}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${announcement.is_active ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'}`}>
+                                            {announcement.is_active ? 'Ano' : 'Ne'}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                                        <button
+                                            onClick={() => handleEdit(announcement)}
+                                            className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 p-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-700 transition"
+                                            title="Editovat"
+                                        >
+                                            <Edit size={18} />
+                                        </button>
+                                        <button
+                                            onClick={() => handleDelete(announcement.id)}
+                                            className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 p-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-700 transition"
+                                            title="Smazat"
+                                        >
+                                            <Trash2 size={18} />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            <AnnouncementModal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                initialData={editingData}
+                onSaveSuccess={fetchAnnouncements}
+            />
+        </div>
+    );
+
+};
+
+export default AdminAnnouncementManager;
+
+// src/app/admin/users/page.tsx - Modernizovaná správa uživatelů s filtry (záložkami)
+'use client';
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { GridLoader } from 'react-spinners';
+import { Check, UserX, UserCheck, X } from 'lucide-react'; // Ikony pro akce
+
+// --- TYPY DAT Z DATABÁZE ---
+interface Profile {
+id: string;
+full_name: string | null;
+email: string | null;
+role: 'admin' | 'user';
+status: 'pending' | 'approved' | 'blocked'; // Doplněno 'blocked' pro přehlednost
+is_blocked: boolean; // Zůstává pro blokování na úrovni profilu
+}
+
+// Typ pro záložky/filtry
+type UserFilter = 'pending' | 'approved' | 'blocked' | 'all';
+
+const UserManagementPage = () => {
+const [profiles, setProfiles] = useState<Profile[]>([]);
+const [isLoading, setIsLoading] = useState(true);
+const [error, setError] = useState<string | null>(null);
+const [activeFilter, setActiveFilter] = useState<UserFilter>('pending'); // Začínáme u Neschválených
+const { user } = useAuth();
+
+    // Zajišťujeme správné mapování stavu, pokud status neobsahuje 'blocked'
+    const formatProfiles = (data: any[]): Profile[] => {
+        return data.map(p => ({
+            ...p,
+            role: p.role as 'admin' | 'user',
+            status: p.is_blocked ? 'blocked' : (p.status as 'pending' | 'approved' | 'blocked'),
+        }));
+    };
+
+    // --- FUNKCE PRO NAČTENÍ PROFILŮ ---
+    const fetchProfiles = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+
+        const { data: profilesData, error: fetchError } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, role, status, is_blocked')
+            .order('full_name', { ascending: true });
+
+        if (fetchError) {
+            console.error('Chyba při načítání profilů:', fetchError);
+            setError('Nepodařilo se načíst uživatelské profily.');
+        } else {
+            setProfiles(formatProfiles(profilesData || []));
+        }
+        setIsLoading(false);
+    }, []);
+
+    // --- FUNKCE PRO AKTUALIZACI PROFILU ---
+    const updateProfile = async (id: string, updates: Partial<Profile>) => {
+        if (!user) return;
+
+        // Extrahujeme pouze sloupce relevantní pro databázi
+        const dbUpdates: Partial<Omit<Profile, 'email'>> = {
+            full_name: updates.full_name,
+            role: updates.role,
+            status: updates.status,
+            is_blocked: updates.is_blocked,
+        };
+
+        const { error: updateError } = await supabase
+            .from('profiles')
+            .update(dbUpdates)
+            .eq('id', id);
+
+        if (updateError) {
+            setError(`Chyba při aktualizaci profilu ${id}: ${updateError.message}`);
+            return;
+        }
+
+        // Aktualizujeme stav lokálně
+        setProfiles(prev =>
+            prev.map(p => {
+                if (p.id === id) {
+                    // Důležité: Upravit status, pokud se mění is_blocked
+                    let newStatus = updates.status || p.status;
+                    if (updates.is_blocked !== undefined) {
+                        newStatus = updates.is_blocked ? 'blocked' : (p.status === 'blocked' ? 'pending' : p.status);
+                    }
+                    return { ...p, ...updates, status: newStatus };
+                }
+                return p;
+            })
+        );
+        setError(null);
+    };
+
+    useEffect(() => {
+        fetchProfiles();
+    }, [fetchProfiles]);
+
+
+    // --- FILTRACE PROFILŮ PODLE AKTIVNÍ ZÁLOŽKY ---
+    const filteredProfiles = useMemo(() => {
+        if (activeFilter === 'all') return profiles;
+
+        return profiles.filter(p => {
+            if (activeFilter === 'blocked') {
+                // Filtrujeme, pokud je uživatel blokovaný
+                return p.is_blocked;
+            }
+            if (activeFilter === 'approved') {
+                // Filtrujeme, pokud je schválený A NENÍ blokovaný
+                return p.status === 'approved' && !p.is_blocked;
+            }
+            if (activeFilter === 'pending') {
+                 // Filtrujeme, pokud čeká na schválení A NENÍ blokovaný
+                return p.status === 'pending' && !p.is_blocked;
+            }
+            return false;
+        });
+    }, [profiles, activeFilter]);
+
+    // Definice záložek
+    const tabs: { name: UserFilter, label: string, count: number }[] = useMemo(() => [
+        { name: 'pending', label: 'Neschválení', count: profiles.filter(p => p.status === 'pending' && !p.is_blocked).length },
+        { name: 'approved', label: 'Schválení', count: profiles.filter(p => p.status === 'approved' && !p.is_blocked).length },
+        { name: 'blocked', label: 'Blokovaní', count: profiles.filter(p => p.is_blocked).length },
+        { name: 'all', label: 'Všichni', count: profiles.length },
+    ], [profiles]);
+
+
+    // --- RENDERING OVLÁDÁNÍ STAVU A CHYB ---
+    if (isLoading) {
+        return (
+            <div className="flex justify-center items-center h-64">
+                <GridLoader color="#0066ff" />
+            </div>
+        );
+    }
+
+    if (error) {
+        return <div className="p-4 bg-red-100 text-red-700 rounded dark:bg-red-900 dark:text-red-300">Chyba: {error}</div>;
+    }
+
+    const getStatusStyle = (profile: Profile) => {
+        if (profile.is_blocked) return 'bg-red-500 text-white';
+        if (profile.status === 'approved') return 'bg-green-100 text-green-800';
+        if (profile.status === 'pending') return 'bg-yellow-100 text-yellow-800';
+        return 'bg-gray-100 text-gray-800';
+    };
+
+
+    // --- RENDERING KOMPONENTY ---
+    return (
+        <div className="bg-white dark:bg-zinc-800 p-6 rounded-lg shadow-xl">
+            <h2 className="text-2xl font-bold mb-6 text-gray-800 dark:text-gray-100 border-b pb-2">Správa Uživatelů 👤</h2>
+
+            {/* Navigace záložkami (Filtry) */}
+            <nav className="mb-6 border-b border-gray-200 dark:border-zinc-700">
+                <div className="flex space-x-4 overflow-x-auto">
+                    {tabs.map(tab => (
+                        <button
+                            key={tab.name}
+                            onClick={() => setActiveFilter(tab.name)}
+                            className={`
+                                py-2 px-4 text-sm font-semibold transition-colors duration-150 relative
+                                ${activeFilter === tab.name
+                                    ? 'text-blue-600 border-b-2 border-blue-600 dark:text-blue-400 dark:border-blue-400'
+                                    : 'text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
+                                }
+                            `}
+                        >
+                            {tab.label} ({tab.count})
+                        </button>
+                    ))}
+                </div>
+            </nav>
+
+            {/* Obsah tabulky */}
+            {filteredProfiles.length === 0 ? (
+                <p className="p-4 text-gray-500 dark:text-zinc-400">V této sekci nejsou žádní uživatelé k zobrazení.</p>
+            ) : (
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 dark:divide-zinc-700">
+                        <thead className="bg-gray-50 dark:bg-zinc-700">
+                            <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-zinc-300 uppercase tracking-wider">Uživatel</th>
+                                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-zinc-300 uppercase tracking-wider">Role</th>
+                                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-zinc-300 uppercase tracking-wider">Stav</th>
+                                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-zinc-300 uppercase tracking-wider">Akce</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white dark:bg-zinc-800 divide-y divide-gray-200 dark:divide-zinc-700">
+                            {filteredProfiles.map((profile) => (
+                                <tr
+                                    key={profile.id}
+                                    className={`
+                                        transition-colors hover:bg-gray-50 dark:hover:bg-zinc-700/50
+                                        ${profile.is_blocked ? 'opacity-70' : ''}
+                                    `}
+                                >
+                                    {/* Jméno a Email */}
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                        <div className="text-sm font-medium text-gray-900 dark:text-zinc-100">{profile.full_name || 'N/A'}</div>
+                                        <div className="text-sm text-gray-500 dark:text-zinc-400">{profile.email}</div>
+                                    </td>
+
+                                    {/* Role (Select) */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                                        <select
+                                            value={profile.role}
+                                            onChange={(e) => updateProfile(profile.id, { role: e.target.value as 'admin' | 'user' })}
+                                            className={`p-1 rounded border text-sm font-medium dark:bg-zinc-700 dark:border-zinc-600
+                                            ${profile.role === 'admin' ? 'bg-red-100 text-red-700 dark:text-red-300' : 'bg-green-100 text-green-700 dark:text-green-300'}`}
+                                            disabled={profile.is_blocked}
+                                        >
+                                            <option value="user">USER</option>
+                                            <option value="admin">ADMIN</option>
+                                        </select>
+                                    </td>
+
+                                    {/* Stav (Status Label) */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusStyle(profile)}`}>
+                                            {profile.status.toUpperCase()}
+                                        </span>
+                                    </td>
+
+                                    {/* Akce */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium space-x-2">
+
+                                        {/* Tlačítko pro Schválení/Neschválení */}
+                                        {profile.status !== 'approved' && !profile.is_blocked && (
+                                            <button
+                                                onClick={() => updateProfile(profile.id, { status: 'approved' })}
+                                                className="p-2 rounded-full text-green-600 hover:bg-green-100 dark:hover:bg-green-900/50 transition"
+                                                title="Schválit uživatele"
+                                            >
+                                                <UserCheck size={20} />
+                                            </button>
+                                        )}
+                                        {profile.status === 'approved' && !profile.is_blocked && (
+                                            <button
+                                                onClick={() => updateProfile(profile.id, { status: 'pending' })}
+                                                className="p-2 rounded-full text-yellow-600 hover:bg-yellow-100 dark:hover:bg-yellow-900/50 transition"
+                                                title="Přesunout do čekajících"
+                                            >
+                                                <X size={20} />
+                                            </button>
+                                        )}
+
+                                        {/* Tlačítko pro Blokování/Odblokování */}
+                                        <button
+                                            onClick={() => updateProfile(profile.id, { is_blocked: !profile.is_blocked, status: !profile.is_blocked ? 'blocked' : 'pending' })}
+                                            className={`p-2 rounded-full transition ${
+                                                profile.is_blocked
+                                                ? 'text-white bg-red-600 hover:bg-red-700'
+                                                : 'text-red-600 hover:bg-red-100 dark:hover:bg-red-900/50'
+                                            }`}
+                                            title={profile.is_blocked ? 'Odblokovat uživatele' : 'Blokovat uživatele'}
+                                        >
+                                            {profile.is_blocked ? <Check size={20} /> : <UserX size={20} />}
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
+
+};
+
+export default UserManagementPage;
+
+// src/app/admin/layout.tsx
+'use client';
+
+import { useAuth } from '@/context/AuthContext';
+import { useRouter, useSearchParams } from 'next/navigation';
+import React, { useEffect } from 'react';
+import Link from 'next/link';
+
+export default function AdminLayout({
+children,
+}: {
+children: React.ReactNode;
+}) {
+const { role, isLoading } = useAuth();
+const router = useRouter();
+const searchParams = useSearchParams();
+
+// Získá aktuálně vybranou záložku, defaultně 'jizdni-rady'
+const activeTab = searchParams.get('tab') || 'jizdni-rady';
+
+useEffect(() => {
+if (!isLoading) {
+if (role !== 'admin') {
+alert('Přístup povolen pouze administrátorům!');
+router.push('/');
+}
+}
+}, [role, isLoading, router]);
+
+if (isLoading || role !== 'admin') {
+return <div className="p-10 text-center text-gray-500 dark:text-gray-400">Ověřování admin oprávnění...</div>;
+}
+
+// Pomocná funkce pro generování URL pro záložky
+const getTabUrl = (tabName: string, extraPath?: string) => {
+if (extraPath) {
+return `/admin/${extraPath}?tab=${tabName}`;
+}
+return `/admin/dashboard?tab=${tabName}`;
+};
+
+    // Definice všech záložek pro snadnější údržbu a mapování
+    const adminTabs = [
+        { name: 'jizdni-rady', label: 'Tabulky 🚆', extraPath: 'dashboard', color: 'blue' },
+        { name: 'dokumenty', label: 'Dokumenty 📃', extraPath: 'dashboard', color: 'green' },
+        { name: 'oznameni', label: 'Oznámení 🔔', extraPath: 'oznameni', color: 'purple' },
+        { name: 'users', label: 'Uživatelé 👤', extraPath: 'users', color: 'red' },
+        { name: 'contact', label: 'Kontaktní zprávy 📬', extraPath: 'contact', color: 'yellow' },
+    ];
+
+return (
+
+    <div className="min-h-screen bg-gray-100 dark:bg-gray-900">
+      {/* HLAVNÍ OBSAH: Zajišťuje max. šířku a centrování v ose X */}
+      <main className="max-w-7xl mx-auto p-4 sm:p-8"> {/* <- KLÍČOVÉ ZMĚNY ZDE: max-w-7xl a mx-auto */}
+        <h1 className="text-3xl sm:text-4xl font-bold mb-6 text-gray-800 dark:text-zinc-50">
+          🔑 Admin Dashboard
+        </h1>
+
+        {/* Admin Navigace (Záložky) */}
+        <nav className="w-full bg-white dark:bg-zinc-800 p-1 rounded-t-lg shadow-md overflow-x-auto">
+            <div className="flex border-b border-gray-200 dark:border-zinc-700">
+              {adminTabs.map((tab) => (
+                  <Link
+                      key={tab.name}
+                      href={getTabUrl(tab.name, tab.extraPath === 'dashboard' ? undefined : tab.extraPath)}
+                      className={`
+                          py-3 px-4 text-sm font-medium transition-colors duration-200 whitespace-nowrap
+                          ${activeTab === tab.name
+                              ? `border-b-4 border-${tab.color}-600 dark:border-${tab.color}-400 text-${tab.color}-700 dark:text-${tab.color}-400`
+                              : 'text-gray-600 dark:text-zinc-300 hover:text-gray-900 dark:hover:text-zinc-50 hover:bg-gray-50 dark:hover:bg-zinc-700'
+                          }
+                      `}
+                  >
+                      {tab.label}
+                  </Link>
+              ))}
+            </div>
+        </nav>
+
+        {/* Obsah stránky (zobrazení záložky) */}
+        <div className="w-full bg-white dark:bg-zinc-800 p-4 sm:p-6 rounded-b-lg shadow-lg min-h-[50vh]">
+            {children}
+        </div>
+      </main>
+    </div>
+
+);
+}
+
+// src/app/auth/callback/page.tsx
+
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
+// Tato komponenta je vyvolána Supabase po úspěšném přihlášení (OAuth flow)
+// a zpracuje hash v URL pro uložení relace.
+export default function AuthCallbackPage() {
+const router = useRouter();
+
+useEffect(() => {
+// Supabase automaticky zpracuje relaci z URL hashe.
+// Po krátké prodlevě (pro jistotu, že se relace stihla uložit) přesměrujeme.
+setTimeout(() => {
+// Přesměrování na chráněnou stránku portálu
+router.push('/user-portal/tables');
+}, 500);
+
+    // Poznámka: Next.js Middleware by měl uživatele přesměrovat,
+    // pokud zkusí navštívit /auth/callback po vypršení tokenu.
+
+}, [router]);
+
+return (
+<div className="flex items-center justify-center h-screen bg-gray-50">
+<h1 className="text-xl text-gray-700">Zpracování přihlášení...</h1>
+</div>
+);
+}
+
+// src/app/blocked/page.tsx
+const BlockedPage = () => {
+return (
+<div className="flex flex-col items-center justify-center min-h-screen bg-red-50 p-6 text-center">
+<h1 className="text-4xl font-bold text-red-700 mb-4">🚫 Váš účet byl zablokován</h1>
+<p className="text-lg text-gray-600">
+Nemáte přístup k uživatelskému portálu. Pro další informace kontaktujte prosím administrátora.
+</p>
+</div>
+);
+};
+export default BlockedPage;
+
+// src/app/contact/page.tsx
+'use client';
+
+import React, { useState } from 'react';
+import { Mail, Phone, MapPin, Send } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client'; // <-- DŮLEŽITÉ: Import supabase instance
+
+export default function Contact() {
+// ... (ostatní stavy zůstávají stejné)
+const [name, setName] = useState('');
+const [email, setEmail] = useState('');
+const [message, setMessage] = useState('');
+const [status, setStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+
+    // FUNKCE PRO ODESLÁNÍ DO DATABÁZE
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+
+        if (!name.trim() || !email.trim() || !message.trim()) {
+            setStatus('error'); // Změna statusu pro lepší zpětnou vazbu
+            return;
+        }
+
+        setStatus('sending');
+
+        const { error } = await supabase
+            .from('contact_form')
+            .insert({
+                name: name.trim(),
+                email: email.trim(),
+                message: message.trim(),
+            });
+
+        if (error) {
+            console.error('Chyba při odesílání kontaktu do Supabase:', error);
+            setStatus('error');
+            // Zobrazit chybovou zprávu jen na 5 sekund
+            setTimeout(() => setStatus('idle'), 5000);
+        } else {
+            // Úspěch
+            setStatus('success');
+            setName('');
+            setEmail('');
+            setMessage('');
+            setTimeout(() => setStatus('idle'), 5000);
+        }
+    };
+
+    const getButtonText = () => {
+        switch (status) {
+            case 'sending':
+                return 'Odesílám...';
+            case 'success':
+                return 'Odesláno! ✅';
+            case 'error':
+                return 'Zkuste to znovu ❌';
+            default:
+                return 'Odeslat Zprávu';
+        }
+    };
+
+    // ... (zbytek JSX kódu zůstává stejný)
+
+    return (
+        <div className="flex min-h-screen items-center justify-center bg-white py-12 px-4 sm:px-6 lg:px-8 dark:bg-gray-900 p-4 sm:p-8">
+            <div className="max-w-4xl mx-auto bg-white shadow-xl rounded-2xl overflow-hidden">
+                <div className="lg:grid lg:grid-cols-2">
+
+                    {/* Sekce s Informacemi (beze změny) */}
+                    <div className="p-10 bg-blue-700 text-white flex flex-col justify-center">
+                        <h2 className="text-3xl font-extrabold mb-4">
+                            Kontaktujte nás
+                        </h2>
+                        <p className="mb-8 opacity-90">
+                            Neváhejte se obrátit na administraci s jakýmikoliv dotazy, návrhy nebo technickými problémy.
+                        </p>
+
+                        <div className="space-y-6">
+                            <div className="flex items-center">
+                                <Mail className="w-6 h-6 mr-3 text-blue-300" />
+                                <div>
+                                    <p className="font-semibold">Email pro podporu</p>
+                                    <a href="mailto:preissler.jirik@gmail.com" className="hover:underline opacity-80">
+                                        preissler.jirik[@]gmail.com
+                                    </a>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center">
+                                <Phone className="w-6 h-6 mr-3 text-blue-300" />
+                                <div>
+                                    <p className="font-semibold">Horká linka (Admin)</p>
+                                    <a href="tel:+0609112777" className="hover:underline opacity-80">
+                                        0609 112 777
+                                    </a>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center">
+                                <MapPin className="w-6 h-6 mr-3 text-blue-300" />
+                                <div>
+                                    <p className="font-semibold">Sídlo společnosti</p>
+                                    <p className="opacity-80">tř.Budovatelů 1395/23, 434 01 Most</p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center">
+                                <MapPin className="w-6 h-6 mr-3 text-blue-300" />
+                                <div>
+                                    <p className="font-semibold">Stránky společnosti</p>
+                                    <p className="opacity-80"><a href="https://www.dpmost.cz/" target='_blank' className="hover:underline opacity-80">
+                                        https://www.dpmost.cz/
+                                    </a></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Sekce s Formulářem */}
+                    <div className="p-10 dark:bg-zinc-800 dark:text-zinc-200">
+                        <h2 className="text-2xl font-bold text-gray-900 mb-6 dark:text-gray-100">
+                            Rychlá Zpráva
+                        </h2>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-200">Jméno</label>
+                                <input
+                                    id="name"
+                                    type="text"
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    required
+                                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-3 focus:ring-blue-500 focus:border-blue-500"
+                                    disabled={status === 'sending'}
+                                />
+                            </div>
+
+                            <div>
+                                <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-200">Email</label>
+                                <input
+                                    id="email"
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    required
+                                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-3 focus:ring-blue-500 focus:border-blue-500"
+                                    disabled={status === 'sending'}
+                                />
+                            </div>
+
+                            <div>
+                                <label htmlFor="message" className="block text-sm font-medium text-gray-700 dark:text-gray-200">Zpráva</label>
+                                <textarea
+                                    id="message"
+                                    rows={4}
+                                    value={message}
+                                    onChange={(e) => setMessage(e.target.value)}
+                                    required
+                                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-3 focus:ring-blue-500 focus:border-blue-500"
+                                    disabled={status === 'sending'}
+                                />
+                            </div>
+
+                            <button
+                                type="submit"
+                                className={`w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-md shadow-sm text-base font-medium text-white transition duration-200 ${
+                                    status === 'success' ? 'bg-green-600 hover:bg-green-700' :
+                                    status === 'sending' ? 'bg-gray-500 cursor-not-allowed' :
+                                    status === 'error' ? 'bg-red-500 hover:bg-red-600' :
+                                    'bg-blue-600 hover:bg-blue-700'
+                                }`}
+                                disabled={status !== 'idle'}
+                            >
+                                <Send className="w-5 h-5 mr-2" />
+                                {getButtonText()}
+                            </button>
+
+                            {/* Zprávy o stavu */}
+                            {status === 'success' && (
+                                <p className="text-green-600 text-center font-semibold mt-2">
+                                    Děkujeme! Vaše zpráva byla úspěšně odeslána.
+                                </p>
+                            )}
+                            {status === 'error' && (
+                                <p className="text-red-600 text-center font-semibold mt-2">
+                                    Odeslání se nezdařilo. Zkontrolujte připojení a zkuste to znovu.
+                                </p>
+                            )}
+                        </form>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    );
+
+}
+
+// src/app/prihlaseni/page.tsx
+
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { useRouter } from 'next/navigation';
+// import { GridLoader } from 'react-spinners'; // Komentováno, pokud GridLoader způsobuje problém s chybějícím importem
+
+const PrihlaseniPage = () => {
+const [loading, setLoading] = useState(false);
+const [error, setError] = useState<string | null>(null);
+
+const { user, isLoading: isAuthLoading } = useAuth();
+const router = useRouter();
+
+// Efekt pro přesměrování již přihlášených uživatelů (Zůstává stejný)
+useEffect(() => {
+if (!isAuthLoading && user) {
+router.push('/user-portal/tabulky'); // Zkontrolujte cestu, pokud jste použil /tables
+}
+}, [user, isAuthLoading, router]);
+
+// --- NOVÁ FUNKCE PRO PŘIHLÁŠENÍ PŘES GOOGLE ---
+const handleGoogleLogin = async () => {
+setError(null);
+setLoading(true);
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        // Důležité: Tím se Supabase přesměruje zpět na vaši aplikaci po přihlášení
+        redirectTo: window.location.origin + '/auth/callback',
+        // Volitelně: Můžete přidat 'access_type: 'offline'' pro získání refresh tokenu
+      },
+    });
+
+    if (error) {
+      setError(`Chyba při přihlašování přes Google: ${error.message}`);
+      setLoading(false);
+    }
+    // Při úspěchu Supabase automaticky přesměruje uživatele na Google přihlašovací stránku.
+    // Není potřeba ručně nastavovat loading na false, protože uživatel opustí stránku.
+
+};
+
+// Zobrazení načítací obrazovky během ověřování stavu v AuthContextu (Zůstává stejný)
+if (isAuthLoading || user) {
+return (
+<div className="flex items-center justify-center h-screen bg-gray-50">
+<p className="text-lg text-gray-600">Ověřování přihlášení a přesměrování...</p>
+{/_ GridLoader color="#0066ff" -- Odkomentujte, pokud máte instalovaný balíček react-spinners _/}
+</div>
+);
+}
+
+// --- NOVÉ JSX PRO PŘIHLÁŠENÍ PŘES GOOGLE ---
+return (
+<div className="flex items-center justify-center h-screen bg-gray-50">
+<div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+<h2 className="text-2xl font-bold mb-6 text-center text-gray-800">Přihlášení do MHD Portálu</h2>
+
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4" role="alert">
+            {error}
+          </div>
+        )}
+
+        <div className="space-y-4">
+            <button
+              onClick={handleGoogleLogin}
+              disabled={loading}
+              className="w-full flex items-center justify-center bg-white border border-gray-300 text-gray-700 font-semibold py-3 px-4 rounded-lg shadow-sm hover:shadow-md transition disabled:opacity-50"
+            >
+              {/* Ikona Google (můžete nahradit skutečnou SVG ikonou) */}
+              <span className="text-xl mr-3">G</span>
+              {loading ? 'Přesměrování...' : 'Přihlásit se pomocí Google'}
+            </button>
+
+            <p className="text-center text-sm text-gray-500 pt-2">
+                Přihlášení je dostupné pouze pro autorizované účty.
+            </p>
+        </div>
+
+      </div>
+    </div>
+
+);
+};
+
+export default PrihlaseniPage;
+
+// src/app/maps/page.tsx
+
+import Link from "next/link";
+import { ArrowUpRight } from "lucide-react"; // Importujeme ikonu pro externí odkaz
+
+// Ponecháváme komentáře pro Google Maps jako budoucí referenci, ale NEPOUŽÍVÁME JE TEĎ.
+
+export default function Maps() {
+return (
+<div className="flex min-h-screen items-center justify-center bg-white font-sans dark:bg-gray-900 p-4 sm:p-8">
+<main className="w-full max-w-4xl flex flex-col items-center justify-center p-6 sm:p-10 md:p-12 bg-white dark:bg-zinc-800 shadow-2xl rounded-2xl">
+
+        <div className="flex flex-col items-center gap-6 text-center">
+          <h2 className="max-w-4xl mx-auto text-2xl font-bold mb-6 text-gray-800 dark:text-gray-100 border-b pb-2">
+            Mapa polohy vozidel MHD 🚌
+          </h2>
+
+          <p className="max-w-xl text-lg leading-8 text-zinc-600 dark:text-zinc-400">
+            Z důvodu technických omezení zabezpečení externí mapové služby
+            **není možné** zobrazit mapu MHD přímo na této stránce.
+            Kliknutím na tlačítko budete **přesměrováni** na oficiální stránku města Mostu,
+            kde uvidíte aktuální polohu vozidel.
+          </p>
+
+          {/* TLAČÍTKO S PŘÍMÝM ODKAZEM */}
+          <Link
+            href="https://mapy.mesto-most.cz/app/mhd/"
+            target="_blank" // Otevře v novém okně/záložce
+            rel="noopener noreferrer" // Bezpečnostní doporučení
+            className="mt-8 flex items-center bg-blue-600 text-white font-bold py-3 px-8 rounded-lg text-xl shadow-lg hover:bg-blue-700 transition duration-300 transform hover:scale-105"
+          >
+            Zobrazit mapu MHD Most a Litvínov
+            <ArrowUpRight className="w-5 h-5 ml-2" />
+          </Link>
+
+        </div>
+      </main>
+    </div>
+
+);
+}
+
+// src/app/user-portal/pending-info/page.tsx
+'use client';
+import React from 'react';
+
+// ----------------------------------------------------------------------
+// --- KOMPONENTA STRÁNKY S INFORMACEMI O ČEKÁNÍ NA SCHVÁLENÍ ---
+// ----------------------------------------------------------------------
+const PendingInfoPage = () => {
+return (
+<div className="flex flex-col items-center justify-center min-h-screen bg-yellow-50 p-6 text-center">
+<h1 className="text-4xl font-bold text-yellow-700 mb-4">⏳ Čekání na schválení</h1>
+<p className="text-lg text-gray-700">
+Váš účet byl úspěšně vytvořen a čeká na schválení administrátorem.
+Jakmile bude váš přístup schválen, získáte plný přístup k jízdním řádům a dokumentům.
+</p>
+<p className="mt-4 text-sm text-gray-500">
+Děkujeme za trpělivost.
+</p>
+</div>
+);
+};
+export default PendingInfoPage;
+
+// src/app/user-portal/chat/page.tsx
+
+'use client';
+
+import React from 'react';
+import ChatComponent from '@/components/chat/ChatComponent'; // Zde bude hlavní logika
+import { useAuth } from '@/context/AuthContext';
+import { GridLoader } from 'react-spinners';
+
+const ChatPage = () => {
+// Kontext pro získání informací o uživateli a načítacích stavech
+const { user, status, role, isLoading } = useAuth();
+//console.log('ChatPage render - user:', user, 'status:', status, 'isLoading:', isLoading);
+if (isLoading) {
+return (
+<div className="flex justify-center items-center h-screen bg-gray-100">
+<GridLoader color="#4F46E5" size={15} />
+<p className='ml-4 text-gray-700'>Načítám chat...</p>
+</div>
+);
+}
+
+// Zde by měla zasáhnout ochrana v layout.tsx pro pending/blocked,
+// ale pro jistotu zkontrolujeme status (ačkoliv by RLS zablokovalo data)
+if (!user || status !== 'approved') {
+return (
+<div className="p-8 text-center bg-white rounded-lg shadow-md mt-10">
+<h1 className="text-2xl text-red-600">Přístup odepřen</h1>
+<p className="text-gray-600">Musíte být schválený uživatel pro přístup do chatu.</p>
+</div>
+);
+}
+
+return (
+<div className="min-h-screen bg-white p-4 md:p-8 sm:p-8 dark:bg-gray-900 ">
+<h2 className="max-w-4xl mx-auto text-2xl font-bold mb-6 text-gray-800 dark:text-gray-100 border-b pb-2">Chat</h2>
+
+      {/* Hlavní chat komponenta */}
+      <div className="max-w-4xl mx-auto h-[70vh] bg-white shadow-2xl shadow-gray-500 rounded-xl flex flex-col">
+        <ChatComponent
+            currentUserId={user.id}
+        />
+      </div>
+
+    </div>
+
+);
+};
+
+export default ChatPage;
+
+// src/app/user-portal/dokumenty/page.tsx
+'use client';
+
+import React, { useState, useEffect, useCallback, FormEvent } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { GridLoader } from 'react-spinners';
+import Link from 'next/link';
+// Přidány ikony pro Úpravu a Smazání
+import { FileText, BookOpen, Settings, Info, Download, Edit, Trash2, X } from 'lucide-react';
+
+// --- TYPY DAT Z DATABÁZE ---
+interface Document {
+id: string;
+title: string;
+description: string | null;
+file_path: string; // Cesta k souboru ve Storage
+admin_only: boolean;
+type: 'smernice' | 'manualy' | 'jine';
+created_at: string;
+}
+
+type DocumentType = 'all' | 'smernice' | 'manualy' | 'jine';
+
+// ----------------------------------------------------------------------
+// --- PLACEHOLDER PRO MODAL PRO ÚPRAVU (musí být vytvořen jako samostatná komponenta) ---
+// ----------------------------------------------------------------------
+
+interface EditDocumentModalProps {
+isOpen: boolean;
+onClose: () => void;
+document: Document | null;
+onSave: (updatedDoc: Partial<Document>) => void;
+}
+
+// 💡 Zde byste normálně importovali skutečnou komponentu modalu.
+// V tomto příkladu necháme jednoduchý placeholder pro správnou funkci.
+const EditDocumentModal: React.FC<EditDocumentModalProps> = ({ isOpen, onClose, document, onSave }) => {
+// Lokální stav pro data formuláře, inicializovaný z `document`
+const [formData, setFormData] = useState<Partial<Document>>({});
+const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        // Reset formuláře při otevření modalu nebo změně dokumentu
+        if (document) {
+            setFormData({
+                title: document.title,
+                description: document.description,
+                type: document.type,
+                admin_only: document.admin_only,
+            });
+        }
+    }, [document]);
+
+    if (!isOpen || !document) return null;
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+        const { name, value, type } = e.target;
+
+        // Speciální ošetření pro checkbox
+        const inputValue = type === 'checkbox'
+            ? (e.target as HTMLInputElement).checked
+            : value;
+
+        setFormData(prev => ({
+            ...prev,
+            [name]: inputValue,
+        }));
+    };
+
+    const handleSubmit = async (e: FormEvent) => {
+        e.preventDefault();
+        setIsSaving(true);
+
+        // Filtrování pouze změněných hodnot
+        const changes: Partial<Document> = {};
+        let isChanged = false;
+
+        (['title', 'description', 'type', 'admin_only'] as Array<keyof Document>).forEach(key => {
+            // TypeScript bezpečné porovnání
+            const currentValue = document[key];
+            const newValue = formData[key];
+
+            // Kontrola změn (zejména pro null/string a boolean)
+            if (newValue !== undefined && newValue !== currentValue) {
+                changes[key] = newValue as any;
+                isChanged = true;
+            }
+        });
+
+        try {
+            if (isChanged) {
+                await onSave(changes); // Volání funkce pro uložení v DocumentsPage
+            } else {
+                alert('Nebyly zjištěny žádné změny k uložení.');
+                onClose();
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Chyba při ukládání dokumentu.');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    // Tailwind pro dark mode
+    const inputClasses = "block w-full border border-gray-300 dark:border-zinc-600 rounded-lg shadow-sm p-2 focus:border-blue-500 focus:ring-blue-500 dark:bg-zinc-700 dark:text-zinc-100 transition";
+    const labelClasses = "block text-sm font-medium text-gray-700 dark:text-zinc-300 mb-1";
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white dark:bg-zinc-800 p-6 rounded-lg shadow-2xl max-w-lg w-full relative">
+                <button
+                    onClick={onClose}
+                    className="absolute top-3 right-3 text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-100"
+                    disabled={isSaving}
+                >
+                    <X className="w-6 h-6" />
+                </button>
+
+                <h2 className="text-xl font-bold mb-4 text-gray-800 dark:text-gray-100">Upravit dokument</h2>
+
+                <form onSubmit={handleSubmit}>
+                    {/* Název */}
+                    <div className="mb-4">
+                        <label htmlFor="title" className={labelClasses}>Název</label>
+                        <input
+                            type="text"
+                            id="title"
+                            name="title"
+                            value={formData.title || ''}
+                            onChange={handleChange}
+                            className={inputClasses}
+                            required
+                        />
+                    </div>
+
+                    {/* Popis */}
+                    <div className="mb-4">
+                        <label htmlFor="description" className={labelClasses}>Popis (volitelné)</label>
+                        <textarea
+                            id="description"
+                            name="description"
+                            value={formData.description || ''}
+                            onChange={handleChange}
+                            className={`${inputClasses} h-20`}
+                        />
+                    </div>
+
+                    {/* Typ */}
+                    <div className="mb-4">
+                        <label htmlFor="type" className={labelClasses}>Typ Dokumentu</label>
+                        <select
+                            id="type"
+                            name="type"
+                            value={formData.type || 'jine'}
+                            onChange={handleChange}
+                            className={inputClasses}
+                            required
+                        >
+                            <option value="smernice">Směrnice</option>
+                            <option value="manualy">Manuály</option>
+                            <option value="jine">Jiné</option>
+                        </select>
+                    </div>
+
+                    {/* Pouze pro Adminy */}
+                    <div className="mb-6 flex items-center">
+                        <input
+                            type="checkbox"
+                            id="admin_only"
+                            name="admin_only"
+                            checked={!!formData.admin_only} // !! pro zajištění boolean hodnoty
+                            onChange={handleChange}
+                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600"
+                        />
+                        <label htmlFor="admin_only" className="ml-2 text-sm font-medium text-gray-700 dark:text-zinc-300">
+                            Dokument je pouze pro Adminy
+                        </label>
+                    </div>
+
+                    {/* Tlačítka */}
+                    <div className="mt-4 flex justify-end space-x-2">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-4 py-2 bg-gray-300 dark:bg-zinc-600 text-gray-800 dark:text-zinc-100 rounded hover:bg-gray-400 transition"
+                            disabled={isSaving}
+                        >
+                            Zrušit
+                        </button>
+                        <button
+                            type="submit"
+                            className="px-4 py-2 bg-blue-600 text-white rounded font-semibold hover:bg-blue-700 transition disabled:bg-blue-400"
+                            disabled={isSaving}
+                        >
+                            {isSaving ? 'Ukládání...' : 'Uložit změny'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+
+};
+
+// ----------------------------------------------------------------------
+// --- POMOCNÉ FUNKCE A IKONY (BEZ ZMĚN) ---
+// ----------------------------------------------------------------------
+
+const getTypeIcon = (type: DocumentType) => {
+// Upravené barvy pro dark mód
+switch (type) {
+case 'smernice':
+return <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />;
+case 'manualy':
+return <BookOpen className="w-5 h-5 text-green-600 dark:text-green-400" />;
+case 'jine':
+return <Info className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />;
+default:
+return <FileText className="w-5 h-5 text-gray-500 dark:text-zinc-400" />;
+}
+};
+
+const getTypeName = (type: DocumentType) => {
+switch (type) {
+case 'smernice':
+return 'Směrnice';
+case 'manualy':
+return 'Manuály';
+case 'jine':
+return 'Jiné dokumenty';
+default:
+return 'Všechny typy';
+}
+};
+
+// ----------------------------------------------------------------------
+// --- HLAVNÍ KOMPONENTA DOKUMENTŮ (ZAPOJENÍ ADMIN LOGIKY A MODALU) ---
+// ----------------------------------------------------------------------
+
+const DocumentsPage = () => {
+const { user, isLoading: isAuthLoading, status, role } = useAuth();
+// 💡 Získání role Admin (předpoklad: role je na objektu user)
+const isAdmin = role === 'admin';
+
+    const [documents, setDocuments] = useState<Document[]>([]);
+    const [isLoadingData, setIsLoadingData] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const [selectedType, setSelectedType] = useState<DocumentType>('all');
+    const [searchTerm, setSearchTerm] = useState('');
+
+    // 💡 Stavy pro Modal
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingDocument, setEditingDocument] = useState<Document | null>(null);
+
+    const getDownloadUrl = (filePath: string) => {
+      const { data } = supabase.storage
+        .from('documents')
+        .getPublicUrl(filePath);
+      return data.publicUrl;
+    };
+
+    const fetchDocuments = useCallback(async () => {
+      setIsLoadingData(true);
+      setError(null);
+
+      let query = supabase
+        .from('documents')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+        // 💡 Úprava: Admin vidí vše, User pouze ne-admin_only
+        if (!isAdmin) {
+            query = query.eq('admin_only', false);
+        }
+
+      if (selectedType !== 'all') {
+        query = query.eq('type', selectedType);
+      }
+
+      if (searchTerm) {
+          query = query.ilike('title', `%${searchTerm}%`);
+      }
+
+      const { data, error: fetchError } = await query;
+
+      if (fetchError) {
+        console.error('Chyba při načítání dokumentů:', fetchError);
+        setError('Nepodařilo se načíst dokumenty. Zkontrolujte RLS politiky.');
+      } else {
+        setDocuments(data as Document[] || []);
+      }
+      setIsLoadingData(false);
+    }, [selectedType, searchTerm, isAdmin]); // isAdmin přidán do závislostí
+
+    useEffect(() => {
+      if (!isAuthLoading && user) {
+          fetchDocuments();
+      }
+    }, [isAuthLoading, user, fetchDocuments]);
+
+    // --- ADMIN FUNKCE ---
+
+    const handleEdit = (doc: Document) => {
+        if (!isAdmin) return;
+        setEditingDocument(doc);
+        setIsModalOpen(true);
+    };
+
+    const handleSaveEdit = async (updatedDoc: Partial<Document>) => {
+        if (!editingDocument) return;
+
+        // V reálné aplikaci by zde bylo volání API pro uložení změn
+        console.log('Aktualizace dokumentu:', editingDocument.id, updatedDoc);
+
+        // Zde by mělo být volání do Supabase:
+        /*
+        const { error } = await supabase
+            .from('documents')
+            .update(updatedDoc)
+            .eq('id', editingDocument.id);
+
+        if (error) {
+            alert('Chyba při ukládání: ' + error.message);
+            return;
+        }
+        */
+
+        // Pro ukázku aktualizujeme lokální stav
+        setDocuments(prevDocs => prevDocs.map(d =>
+            d.id === editingDocument.id ? { ...d, ...updatedDoc } : d
+        ));
+        setIsModalOpen(false);
+        setEditingDocument(null);
+        // Po skutečné úpravě je dobré zavolat fetchDocuments() pro znovunačtení ze serveru
+        // fetchDocuments();
+        //alert('Dokument upraven (simulace).');
+    };
+
+    const handleDelete = async (docId: string, filePath: string) => {
+        if (!isAdmin || !confirm('Opravdu chcete dokument Smazat? Tato akce je nevratná.')) return;
+
+        try {
+            setIsLoadingData(true);
+
+            // 1. Smazání souboru ze Supabase Storage
+            const { error: storageError } = await supabase.storage
+                .from('documents')
+                .remove([filePath]);
+
+            if (storageError) throw storageError;
+
+            // 2. Smazání záznamu z tabulky dokumentů
+            const { error: dbError } = await supabase
+                .from('documents')
+                .delete()
+                .eq('id', docId);
+
+            if (dbError) throw dbError;
+
+            // 3. Aktualizace stavu po smazání
+            setDocuments(prevDocs => prevDocs.filter(doc => doc.id !== docId));
+            alert('Dokument byl úspěšně smazán.');
+
+        } catch (error) {
+            console.error('Chyba při mazání dokumentu:', error);
+            alert(`Nepodařilo se smazat dokument: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            setIsLoadingData(false);
+        }
+    };
+
+    // Loading stavy (úprava pro dark mód)
+    if (isAuthLoading || isLoadingData) {
+      return (
+        <div className="flex justify-center items-center min-h-screen bg-gray-50 dark:bg-gray-900">
+          <GridLoader color="#4F46E5" size={10} />
+        </div>
+      );
+    }
+
+    // Chybový stav (úprava pro dark mód)
+    if (error) {
+      return (
+        <div className="p-4 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300 rounded mx-auto max-w-4xl mt-8">
+            <h1 className="font-bold">Chyba:</h1> {error}
+        </div>
+      );
+    }
+
+    // Odepřený přístup (úprava pro dark mód)
+    if (!user || status !== 'approved') {
+      return (
+          <div className="p-8 text-center bg-white dark:bg-zinc-800 rounded-lg shadow-xl mx-auto max-w-md mt-10">
+              <h1 className="text-2xl text-red-600 dark:text-red-400 font-bold">Přístup odepřen</h1>
+              <p className="text-gray-600 dark:text-zinc-400 mt-2">Musíte být schválený uživatel pro přístup k dokumentům.</p>
+          </div>
+      );
+    }
+
+    // Hlavní render
+    return (
+      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 p-4 sm:p-8">
+        <div className="max-w-6xl mx-auto">
+          {/* Nadpis */}
+          <h1 className="max-w-6xl mx-auto text-2xl font-bold mb-6 text-gray-800 dark:text-gray-100 border-b pb-2">
+            Dokumenty {isAdmin && <span className="text-2xl text-red-500">(ADMIN)</span>}
+          </h1>
+
+            {/* Tlačítko pro Správu (Pouze Admin)
+            {isAdmin && (
+                <div className="mb-6 flex justify-end">
+                    <Link
+                        href="/admin/dokumenty/pridat" // Příklad cesty pro přidání nového dokumentu
+                        className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition"
+                    >
+                        <Settings className="w-5 h-5" />
+                        <span>Přidat/Spravovat</span>
+                    </Link>
+                </div>
+            )} */}
+
+          {/* Sekce Filtrů a Vyhledávání (Responsivní layout) */}
+          <div className="bg-white dark:bg-zinc-800 p-4 sm:p-6 rounded-xl shadow-lg mb-8 flex flex-col md:flex-row gap-4">
+                {/* ... filtry beze zmen ... */}
+                <div className="w-full md:w-1/3">
+                    <label htmlFor="docType" className="block text-sm font-medium text-gray-700 dark:text-zinc-300 mb-1">Typ Dokumentu</label>
+                    <select
+                        id="docType"
+                        value={selectedType}
+                        onChange={(e) => setSelectedType(e.target.value as DocumentType)}
+                        className="block w-full border border-gray-300 dark:border-zinc-600 rounded-lg shadow-sm p-2 focus:border-blue-500 focus:ring-blue-500 dark:bg-zinc-700 dark:text-zinc-100 transition"
+                    >
+                        <option value="all">Všechny typy</option>
+                        <option value="smernice">Směrnice</option>
+                        <option value="manualy">Manuály</option>
+                        <option value="jine">Jiné</option>
+                    </select>
+                </div>
+                <div className="w-full md:w-2/3">
+                    <label htmlFor="search" className="block text-sm font-medium text-gray-700 dark:text-zinc-300 mb-1">Vyhledat (v názvu)</label>
+                    <div className="flex">
+                        <input
+                            type="text"
+                            id="search"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="Hledat manuál nebo směrnici..."
+                            className="block w-full border border-gray-300 dark:border-zinc-600 rounded-l-lg shadow-sm p-2 focus:border-blue-500 focus:ring-blue-500 dark:bg-zinc-700 dark:text-zinc-100 transition"
+                        />
+                        <button
+                            onClick={fetchDocuments}
+                            className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-r-lg hover:bg-blue-700 transition shrink-0"
+                        >
+                            Hledej
+                        </button>
+                    </div>
+                </div>
+          </div>
+
+          {/* Seznam Dokumentů */}
+          {documents.length === 0 ? (
+            <div className="bg-white dark:bg-zinc-800 p-6 rounded-xl shadow-lg text-center text-gray-600 dark:text-zinc-400">
+              Nebyly nalezeny žádné dokumenty odpovídající vašim kritériím.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {documents.map((doc) => (
+                // Karta dokumentu
+                <div
+                  key={doc.id}
+                  className="bg-white dark:bg-zinc-800 p-4 sm:p-5 rounded-xl shadow flex flex-col sm:flex-row items-start sm:items-center justify-between hover:shadow-xl transition-shadow border border-gray-100 dark:border-zinc-700"
+                >
+                  <div className="flex items-start space-x-3 sm:space-x-4 w-full sm:w-auto">
+                    {getTypeIcon(doc.type as DocumentType)}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-base sm:text-lg font-bold text-gray-800 dark:text-zinc-50 truncate">{doc.title}</h3>
+                      <p className="text-xs sm:text-sm text-gray-500 dark:text-zinc-400 mt-1 line-clamp-2">{doc.description}</p>
+                      <p className="text-xs text-gray-400 dark:text-zinc-500 mt-1">
+                        Typ: {getTypeName(doc.type as DocumentType)} | Nahráno: {new Date(doc.created_at).toLocaleDateString()}
+                          {doc.admin_only && <span className="text-red-500 dark:text-red-400 ml-2 font-semibold">(Admin Only)</span>}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Akční Tlačítka (Download + Admin Actions) */}
+                  <div className="mt-4 sm:mt-0 sm:ml-6 shrink-0 flex gap-2 w-full sm:w-auto justify-end sm:justify-start">
+                        {/* 💡 Admin Tlačítka (Úprava a Smazání) */}
+                        {isAdmin && (
+                            <>
+                                <button
+                                    onClick={() => handleEdit(doc)} // Otevře modal s daty dokumentu
+                                    className="p-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition"
+                                    title="Upravit dokument"
+                                >
+                                    <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                    onClick={() => handleDelete(doc.id, doc.file_path)} // Smaže dokument
+                                    className="p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+                                    title="Smazat dokument"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                            </>
+                        )}
+
+                        {/* Tlačítko pro stažení */}
+                        <Link
+                          href={getDownloadUrl(doc.file_path)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition w-full sm:w-auto"
+                        >
+                          <Download className="w-4 h-4" />
+                          <span>Stáhnout</span>
+                        </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 💡 Vykreslení Modalu pro úpravu */}
+        <EditDocumentModal
+            isOpen={isModalOpen}
+            onClose={() => setIsModalOpen(false)}
+            document={editingDocument}
+            onSave={handleSaveEdit}
+        />
+      </div>
+    );
+
+};
+
+export default DocumentsPage;
+
+// src/app/user-portal/tabulky/page.tsx
+'use client';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { GridLoader } from 'react-spinners';
+import Image from 'next/image';
+import { Edit, Trash2, Loader2, Upload } from 'lucide-react'; // Přidáno Loader2, Upload
+
+// --- TYPY DAT Z DATABÁZE ---
+interface JizdniRad {
+id: string;
+line_number: string;
+course_number: string;
+transport_type: 'autobus' | 'tramvaj';
+day_type: 'pracovni' | 'vikend';
+part_of_day: 'ranni' | 'odpoledni';
+image_url: string;
+created_at: string;
+}
+
+// --- TYP PRO ZOBRAZENÍ (Seskupená data) ---
+interface GroupedTimetable {
+line_number: string;
+course_number: string;
+transport_type: 'autobus' | 'tramvaj';
+day_type: 'pracovni' | 'vikend';
+created_at: string;
+files: {
+ranni: JizdniRad | null;
+odpoledni: JizdniRad | null;
+};
+}
+
+// --- TYPY FILTRŮ (pro zjednodušení vynechány, ale jsou v JizdniRadyPage) ---
+interface Filters {
+transport_type: 'all' | 'autobus' | 'tramvaj';
+day_type: 'all' | 'pracovni' | 'vikend';
+line_number: string;
+course_number: string;
+}
+// ... (Zde by měly být FilterProps, ImageModalProps)
+
+// ======================================================================
+// === 1. KOMPONENTA IMAGE MODAL (Zůstává stejná) ===
+// ======================================================================
+interface ImageModalProps {
+isOpen: boolean;
+imageUrl: string | null;
+onClose: () => void;
+altText: string;
+}
+
+const ImageModal: React.FC<ImageModalProps> = ({ isOpen, imageUrl, onClose, altText }) => {
+if (!isOpen || !imageUrl) return null;
+return (
+<div 
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-90 backdrop-blur-sm transition-opacity duration-300"
+            onClick={onClose} 
+        >
+<div
+className="relative w-[90vw] h-[90vh] max-w-7xl max-h-[95vh] p-2 sm:p-4 transform transition-transform duration-300"
+onClick={(e) => e.stopPropagation()} >
+<Image
+                    src={imageUrl}
+                    alt={altText}
+                    layout="fill"
+                    objectFit="contain" 
+                    className="rounded-xl shadow-2xl" 
+                    unoptimized
+                />
+
+                <button
+                    onClick={onClose}
+                    className="absolute top-2 right-2 m-2 text-white text-3xl font-bold bg-gray-900 bg-opacity-70 hover:bg-opacity-100 rounded-full w-10 h-10 flex items-center justify-center transition-colors duration-200 z-50"
+                >
+                    &times;
+                </button>
+            </div>
+        </div>
+    );
+
+};
+
+// ======================================================================
+// === 2. KOMPONENTA FILTRŮ (Zůstává stejná) ===
+// ======================================================================
+interface FilterProps {
+filters: Filters;
+onFilterChange: (newFilters: Partial<Filters>) => void;
+onSearch: () => void;
+isLoading: boolean;
+}
+
+const JizdniRadFilters: React.FC<FilterProps> = ({ filters, onFilterChange, onSearch, isLoading }) => {
+// Implementace JizdniRadFilters (byla ve Vašem předchozím kódu, pro úsporu místa zkracuji)
+return (
+<div className="bg-white dark:bg-zinc-800 p-4 sm:p-6 rounded-xl shadow-lg mb-8">
+<h3 className="text-xl font-bold mb-4 text-gray-800 dark:text-zinc-50">Filtrovat Jízdní Řády</h3>
+<div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+{/_ ... filtry ... _/}
+<div>
+<label htmlFor="transportType" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Typ Dopravy</label>
+<select
+id="transportType"
+value={filters.transport_type}
+onChange={(e) => onFilterChange({ transport_type: e.target.value as Filters['transport_type'] })}
+className="mt-1 block w-full border border-gray-300 dark:border-zinc-600 rounded-lg shadow-sm p-2 dark:bg-zinc-700 dark:text-zinc-100 focus:border-blue-500 focus:ring-blue-500 transition"
+disabled={isLoading} >
+<option value="all">Všechny</option>
+<option value="autobus">Autobus 🚌</option>
+<option value="tramvaj">Tramvaj 🚋</option>
+</select>
+</div>
+{/_ ... ostatní filtry ... _/}
+<div>
+<label htmlFor="dayType" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Dny Provozu</label>
+<select
+id="dayType"
+value={filters.day_type}
+onChange={(e) => onFilterChange({ day_type: e.target.value as Filters['day_type'] })}
+className="mt-1 block w-full border border-gray-300 dark:border-zinc-600 rounded-lg shadow-sm p-2 dark:bg-zinc-700 dark:text-zinc-100 focus:border-blue-500 focus:ring-blue-500 transition"
+disabled={isLoading} >
+<option value="all">Všechny</option>
+<option value="pracovni">Pracovní dny</option>
+<option value="vikend">Víkend</option>
+</select>
+</div>
+<div>
+<label htmlFor="lineNumber" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Kurzu</label>
+<input
+type="text"
+id="lineNumber"
+value={filters.line_number}
+onChange={(e) => onFilterChange({ line_number: e.target.value })}
+onKeyDown={(e) => e.key === 'Enter' && onSearch()}
+className="mt-1 block w-full border border-gray-300 dark:border-zinc-600 rounded-lg shadow-sm p-2 dark:bg-zinc-700 dark:text-zinc-100 placeholder:text-zinc-400 focus:border-blue-500 focus:ring-blue-500 transition"
+placeholder="3"
+disabled={isLoading}
+/>
+</div>
+<div>
+<label htmlFor="courseNumber" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Linky</label>
+<input
+type="text"
+id="courseNumber"
+value={filters.course_number}
+onChange={(e) => onFilterChange({ course_number: e.target.value })}
+onKeyDown={(e) => e.key === 'Enter' && onSearch()}
+className="mt-1 block w-full border border-gray-300 dark:border-zinc-600 rounded-lg shadow-sm p-2 dark:bg-zinc-700 dark:text-zinc-100 placeholder:text-zinc-400 focus:border-blue-500 focus:ring-blue-500 transition"
+placeholder="101"
+disabled={isLoading}
+/>
+</div>
+</div>
+<button
+                onClick={onSearch}
+                disabled={isLoading}
+                className="mt-6 w-full bg-blue-600 text-white py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 disabled:opacity-50 font-bold transition"
+            >
+{isLoading ? 'Hledám...' : 'Použít filtry'}
+</button>
+</div>
+);
+};
+
+// ======================================================================
+// === 3. KOMPONENTA MODALU PRO EDITACI (NOVÁ PLNOU IMPLEMENTACÍ) ===
+// ======================================================================
+interface EditTimetableModalProps {
+isOpen: boolean;
+onClose: () => void;
+initialData: GroupedTimetable | null;
+onSaveSuccess: () => void;
+}
+
+const EditTimetableModal: React.FC<EditTimetableModalProps> = ({ isOpen, onClose, initialData, onSaveSuccess }) => {
+
+    const [formData, setFormData] = useState({
+        line_number: '',
+        course_number: '',
+        transport_type: 'autobus' as 'autobus' | 'tramvaj',
+        day_type: 'pracovni' as 'pracovni' | 'vikend',
+    });
+
+    const [fileRanni, setFileRanni] = useState<File | null>(null);
+    const [fileOdpoledni, setFileOdpoledni] = useState<File | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
+    const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (initialData) {
+            setFormData({
+                line_number: initialData.line_number,
+                course_number: initialData.course_number,
+                transport_type: initialData.transport_type,
+                day_type: initialData.day_type,
+            });
+            setFileRanni(null);
+            setFileOdpoledni(null);
+            setStatusMessage(null);
+        }
+    }, [initialData]);
+
+    if (!isOpen || !initialData) return null;
+
+    // Funkce pro nahrání souboru a získání veřejné URL
+    const uploadFile = async (file: File, part: 'ranni' | 'odpoledni', oldRecord: JizdniRad | null) => {
+        const fileExt = file.name.split('.').pop();
+        // Název souboru je klíčový pro přepsání v Supabase Storage!
+        const fileName = `${formData.line_number}_${formData.course_number}_${formData.day_type}_${part}.${fileExt}`;
+        const filePath = `${fileName}`;
+
+        // 1. Nahrání nového souboru do Storage (přepíše stávající soubor se stejným jménem)
+        const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('jizdni-rady') // Jméno vašeho bucketu
+            .upload(filePath, file, {
+                cacheControl: '3600',
+                upsert: true, // Klíčové: pokud soubor existuje, nahradí ho
+            });
+
+        if (uploadError) {
+            throw new Error(`Chyba při nahrávání souboru ${part}: ${uploadError.message}`);
+        }
+
+        // 2. Získání veřejné URL
+        const { data: publicUrlData } = supabase.storage
+            .from('jizdni-rady')
+            .getPublicUrl(filePath);
+
+        // 3. Aktualizace/Vložení záznamu do tabulky jizdni_rady
+        const newRecordData = {
+            line_number: formData.line_number,
+            course_number: formData.course_number,
+            transport_type: formData.transport_type,
+            day_type: formData.day_type,
+            part_of_day: part,
+            image_url: publicUrlData.publicUrl,
+        };
+
+        if (oldRecord) {
+            // AKTUALIZACE STÁVAJÍCÍHO ZÁZNAMU
+            const { error: updateError } = await supabase
+                .from('jizdni_rady')
+                .update(newRecordData)
+                .eq('id', oldRecord.id);
+
+            if (updateError) throw new Error(`Chyba při aktualizaci DB záznamu ${part}: ${updateError.message}`);
+        } else {
+            // VLOŽENÍ NOVÉHO ZÁZNAMU (pokud předtím neexistoval)
+            const { error: insertError } = await supabase
+                .from('jizdni_rady')
+                .insert(newRecordData);
+
+            if (insertError) throw new Error(`Chyba při vkládání DB záznamu ${part}: ${insertError.message}`);
+        }
+    };
+
+    // Hlavní funkce pro uložení změn
+    const handleSave = async () => {
+        setIsSaving(true);
+        setStatusMessage(null);
+
+        try {
+            // Kontrola platnosti dat (přidáno pro robustnost)
+            if (!formData.line_number || !formData.course_number) {
+                 throw new Error('Číslo Linky a Kurzu nesmí být prázdné.');
+            }
+
+            // --- Logika pro RANNÍ část ---
+            if (fileRanni) {
+                await uploadFile(fileRanni, 'ranni', initialData.files.ranni);
+            } else if (initialData.files.ranni && (
+                initialData.files.ranni.line_number !== formData.line_number ||
+                initialData.files.ranni.course_number !== formData.course_number ||
+                initialData.files.ranni.transport_type !== formData.transport_type ||
+                initialData.files.ranni.day_type !== formData.day_type
+            )) {
+                // Pokud nebyl nahrán nový soubor, ale změnila se metadata, aktualizujeme DB záznam
+                 const { error: updateError } = await supabase
+                    .from('jizdni_rady')
+                    .update({
+                        line_number: formData.line_number,
+                        course_number: formData.course_number,
+                        transport_type: formData.transport_type,
+                        day_type: formData.day_type,
+                    })
+                    .eq('id', initialData.files.ranni.id);
+
+                if (updateError) throw new Error(`Chyba při aktualizaci RANNÍ DB metadat: ${updateError.message}`);
+            }
+
+            // --- Logika pro ODPOLEDNÍ část ---
+            if (fileOdpoledni) {
+                await uploadFile(fileOdpoledni, 'odpoledni', initialData.files.odpoledni);
+            } else if (initialData.files.odpoledni && (
+                initialData.files.odpoledni.line_number !== formData.line_number ||
+                initialData.files.odpoledni.course_number !== formData.course_number ||
+                initialData.files.odpoledni.transport_type !== formData.transport_type ||
+                initialData.files.odpoledni.day_type !== formData.day_type
+            )) {
+                // Pokud nebyl nahrán nový soubor, ale změnila se metadata, aktualizujeme DB záznam
+                 const { error: updateError } = await supabase
+                    .from('jizdni_rady')
+                    .update({
+                        line_number: formData.line_number,
+                        course_number: formData.course_number,
+                        transport_type: formData.transport_type,
+                        day_type: formData.day_type,
+                    })
+                    .eq('id', initialData.files.odpoledni.id);
+
+                if (updateError) throw new Error(`Chyba při aktualizaci ODPOLEDNÍ DB metadat: ${updateError.message}`);
+            }
+
+
+            setStatusMessage('Změny byly úspěšně uloženy a soubory nahrány!');
+            onSaveSuccess(); // Aktualizace seznamu na pozadí
+            setTimeout(onClose, 2000); // Zavřít modal po úspěchu
+
+        } catch (error: any) {
+            console.error('Chyba při ukládání:', error);
+            setStatusMessage(`CHYBA: ${error.message}`);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    // Vykreslení
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm p-4"
+            onClick={onClose}
+        >
+            <div
+                className="bg-white dark:bg-zinc-800 p-6 sm:p-8 rounded-xl shadow-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto transform transition-all duration-300"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <h2 className="text-2xl font-bold mb-6 text-blue-600 dark:text-blue-300">
+                    Editovat Jízdní Řád: {initialData.line_number}/{initialData.course_number}
+                </h2>
+
+                {/* FORMULÁŘ */}
+                <div className="space-y-6">
+
+                    {/* Skupina Metadat */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Kurzu:</label>
+                            <input
+                                type="text"
+                                value={formData.line_number}
+                                onChange={(e) => setFormData(prev => ({ ...prev, line_number: e.target.value.trim() }))}
+                                className="mt-1 block w-full p-2 border border-gray-300 rounded-md dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-100"
+                                disabled={isSaving}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Linky:</label>
+                            <input
+                                type="text"
+                                value={formData.course_number}
+                                onChange={(e) => setFormData(prev => ({ ...prev, course_number: e.target.value.trim() }))}
+                                className="mt-1 block w-full p-2 border border-gray-300 rounded-md dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-100"
+                                disabled={isSaving}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Typ Dopravy:</label>
+                            <select
+                                value={formData.transport_type}
+                                onChange={(e) => setFormData(prev => ({ ...prev, transport_type: e.target.value as 'autobus' | 'tramvaj' }))}
+                                className="mt-1 block w-full p-2 border border-gray-300 rounded-md dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-100"
+                                disabled={isSaving}
+                            >
+                                <option value="autobus">Autobus 🚌</option>
+                                <option value="tramvaj">Tramvaj 🚋</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Dny Provozu:</label>
+                            <select
+                                value={formData.day_type}
+                                onChange={(e) => setFormData(prev => ({ ...prev, day_type: e.target.value as 'pracovni' | 'vikend' }))}
+                                className="mt-1 block w-full p-2 border border-gray-300 rounded-md dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-100"
+                                disabled={isSaving}
+                            >
+                                <option value="pracovni">Pracovní dny</option>
+                                <option value="vikend">Víkend</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {/* Nahrávání souborů */}
+                    <p className="text-lg font-semibold text-gray-800 dark:text-zinc-50 border-t pt-4 mt-4">Nahrát nové soubory (volitelné)</p>
+                    <div className="grid grid-cols-2 gap-4">
+
+                        {/* Ranní soubor */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300 flex items-center mb-1">
+                                <Upload size={16} className="mr-1" /> Ranní JŘ ({initialData.files.ranni ? 'Nahrazeno' : 'Vytvořeno'}):
+                            </label>
+                            <input
+                                type="file"
+                                accept="image/png, image/jpeg, image/webp"
+                                onChange={(e) => setFileRanni(e.target.files ? e.target.files[0] : null)}
+                                className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-800 dark:file:text-blue-100"
+                                disabled={isSaving}
+                            />
+                            {initialData.files.ranni && !fileRanni && (
+                                <p className="text-xs text-green-600 dark:text-green-400 mt-1">Stávající soubor bude použit, pokud nenahrajete nový.</p>
+                            )}
+                            {fileRanni && (
+                                <p className="text-xs text-orange-600 dark:text-orange-400 mt-1">Nový soubor: **{fileRanni.name}** připraven k nahrání.</p>
+                            )}
+                        </div>
+
+                        {/* Odpolední soubor */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300 flex items-center mb-1">
+                                <Upload size={16} className="mr-1" /> Odpolední JŘ ({initialData.files.odpoledni ? 'Nahrazeno' : 'Vytvořeno'}):
+                            </label>
+                            <input
+                                type="file"
+                                accept="image/png, image/jpeg, image/webp"
+                                onChange={(e) => setFileOdpoledni(e.target.files ? e.target.files[0] : null)}
+                                className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-800 dark:file:text-blue-100"
+                                disabled={isSaving}
+                            />
+                            {initialData.files.odpoledni && !fileOdpoledni && (
+                                <p className="text-xs text-green-600 dark:text-green-400 mt-1">Stávající soubor bude použit, pokud nenahrajete nový.</p>
+                            )}
+                            {fileOdpoledni && (
+                                <p className="text-xs text-orange-600 dark:text-orange-400 mt-1">Nový soubor: **{fileOdpoledni.name}** připraven k nahrání.</p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Zpráva o stavu */}
+                {statusMessage && (
+                    <div className={`mt-4 p-3 rounded-lg text-sm font-medium ${statusMessage.startsWith('CHYBA') ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300' : 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'}`}>
+                        {statusMessage}
+                    </div>
+                )}
+
+                {/* Tlačítka */}
+                <div className="mt-6 flex justify-end space-x-3">
+                    <button
+                        onClick={onClose}
+                        className="px-4 py-2 bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-100 rounded-lg hover:bg-gray-300 dark:hover:bg-zinc-600 transition disabled:opacity-50"
+                        disabled={isSaving}
+                    >
+                        Zavřít
+                    </button>
+                    <button
+                        onClick={handleSave}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center"
+                        disabled={isSaving || (!fileRanni && !fileOdpoledni &&
+                            formData.line_number === initialData.line_number &&
+                            formData.course_number === initialData.course_number &&
+                            formData.transport_type === initialData.transport_type &&
+                            formData.day_type === initialData.day_type
+                        )}
+                    >
+                        {isSaving ? (
+                            <>
+                                <Loader2 size={18} className="animate-spin mr-2" /> Ukládám...
+                            </>
+                        ) : 'Uložit Změny'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+
+};
+
+// ======================================================================
+// === 4. HLAVNÍ KOMPONENTA JÍZDNÍCH ŘÁDŮ (s Edit Modalem) ===
+// ======================================================================
+
+const JizdniRadyPage = () => {
+const { user, isLoading: isAuthLoading, status, role } = useAuth();
+const isAdmin = role === 'admin';
+
+    // ... (ostatní stavy a filtry zůstávají stejné) ...
+    const [jizdniRady, setJizdniRady] = useState<GroupedTimetable[]>([]);
+    const [isLoadingData, setIsLoadingData] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [modalImageUrl, setModalImageUrl] = useState<string | null>(null);
+    const [modalAltText, setModalAltText] = useState('');
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editData, setEditData] = useState<GroupedTimetable | null>(null);
+
+    const initialFilters: Filters ={
+        transport_type: 'all',
+        day_type: 'all',
+        line_number: '',
+        course_number: '',
+    };
+
+    const [draftFilters, setDraftFilters] = useState<Filters>(initialFilters);
+    const [appliedFilters, setAppliedFilters] = useState<Filters>(initialFilters);
+
+    // Funkce pro fetchování dat je klíčová a musí se volat po editaci/mazání
+    const fetchJizdniRady = useCallback(async () => {
+      setIsLoadingData(true);
+      setError(null);
+
+      let query = supabase
+        .from('jizdni_rady')
+        .select('*')
+        .order('line_number', { ascending: true })
+        .order('course_number', { ascending: true });
+
+      if (appliedFilters.transport_type !== 'all') {
+        query = query.eq('transport_type', appliedFilters.transport_type);
+      }
+      if (appliedFilters.day_type !== 'all') {
+        query = query.eq('day_type', appliedFilters.day_type);
+      }
+      if (appliedFilters.line_number) {
+        query = query.ilike('line_number', `%${appliedFilters.line_number}%`);
+      }
+      if (appliedFilters.course_number) {
+        query = query.ilike('course_number', `%${appliedFilters.course_number}%`);
+      }
+
+      const { data, error: fetchError } = await query;
+        // ... (Logika seskupování dat zůstává stejná) ...
+        if (fetchError) {
+            setError('Nepodařilo se načíst jízdní řády. Zkontrolujte RLS politiky.');
+            setJizdniRady([]);
+        } else {
+            const groupedData = (data as JizdniRad[]).reduce((acc, current) => {
+                const key = `${current.line_number}-${current.course_number}-${current.day_type}`;
+                if (!acc[key]) {
+                    acc[key] = {
+                        line_number: current.line_number,
+                        course_number: current.course_number,
+                        transport_type: current.transport_type,
+                        day_type: current.day_type,
+                        created_at: current.created_at,
+                        files: { ranni: null, odpoledni: null },
+                    };
+                }
+                if (current.part_of_day === 'ranni') {
+                    acc[key].files.ranni = current;
+                } else if (current.part_of_day === 'odpoledni') {
+                    acc[key].files.odpoledni = current;
+                }
+                return acc;
+            }, {} as Record<string, GroupedTimetable>);
+
+            const finalDisplayData = Object.values(groupedData).sort((a, b) =>
+                a.line_number.localeCompare(b.line_number) || a.course_number.localeCompare(b.course_number)
+            );
+            setJizdniRady(finalDisplayData);
+        }
+      setIsLoadingData(false);
+    }, [appliedFilters]);
+
+    useEffect(() => {
+      if (!isAuthLoading && user) {
+          fetchJizdniRady();
+      }
+    }, [isAuthLoading, user, fetchJizdniRady]);
+
+    // Ostatní callbacky (handleFilterChange, handleSearch, openModal, closeModal) zůstávají stejné
+
+    const openEditModal = useCallback((data: GroupedTimetable) => {
+        setEditData(data);
+        setIsEditModalOpen(true);
+    }, []);
+
+    const closeEditModal = useCallback(() => {
+        setIsEditModalOpen(false);
+        setEditData(null);
+    }, []);
+
+    const openModal = useCallback((url: string, alt: string) => {
+        setModalImageUrl(url);
+        setModalAltText(alt);
+        setIsModalOpen(true);
+    }, []);
+
+    const closeModal = useCallback(() => {
+        setIsModalOpen(false);
+        setModalImageUrl(null);
+        setModalAltText('');
+    }, []);
+
+    // Funkce pro MAZÁNÍ (z předchozí odpovědi)
+    const handleDelete = useCallback(async (jizdniRad: GroupedTimetable) => {
+        if (!window.confirm(`Opravdu chcete smazat jízdní řád ${jizdniRad.line_number}/${jizdniRad.course_number} (${jizdniRad.day_type})? Tato akce smaže POUZE záznamy v databázi a soubory v Supabase Storage.`)) {
+            return;
+        }
+
+        setIsLoadingData(true);
+        setError(null);
+
+        try {
+            const filesToDelete: { id: string, image_url: string }[] = [];
+
+            if (jizdniRad.files.ranni) {
+                filesToDelete.push({ id: jizdniRad.files.ranni.id, image_url: jizdniRad.files.ranni.image_url });
+            }
+            if (jizdniRad.files.odpoledni) {
+                filesToDelete.push({ id: jizdniRad.files.odpoledni.id, image_url: jizdniRad.files.odpoledni.image_url });
+            }
+
+            // 1. Smazání souborů ze Supabase Storage
+             for (const file of filesToDelete) {
+                const urlParts = file.image_url.split('/storage/v1/object/public/jizdni-rady/');
+                if (urlParts.length === 2) {
+                    const filePath = urlParts[1];
+                    const { error: storageError } = await supabase.storage
+                        .from('jizdni-rady')
+                        .remove([filePath]);
+                    if (storageError) console.error(`Chyba při mazání souboru ${filePath}:`, storageError.message);
+                }
+            }
+
+            // 2. Smazání z databáze (jizdni_rady)
+            const idsToDelete = filesToDelete.map(f => f.id);
+            if (idsToDelete.length > 0) {
+                const { error: dbError } = await supabase
+                    .from('jizdni_rady')
+                    .delete()
+                    .in('id', idsToDelete);
+
+                if (dbError) throw new Error(`Chyba při mazání záznamů v DB: ${dbError.message}`);
+            }
+
+            // 3. Aktualizace UI
+            alert('Jízdní řád byl úspěšně smazán!');
+            await fetchJizdniRady();
+
+        } catch (e: any) {
+            setError(`Chyba při mazání: ${e.message}`);
+            setIsLoadingData(false);
+        }
+
+    }, [fetchJizdniRady]);
+
+
+    // Ochrana přístupu (zůstává stejná)
+    if (isAuthLoading || isLoadingData) { /* ... Loading UI ... */
+        return (
+            <div className="flex justify-center items-center min-h-screen bg-gray-50 dark:bg-gray-900">
+            <GridLoader color="#0066ff" size={15} />
+            </div>
+        );
+    }
+    if (error) { /* ... Error UI ... */
+        return (
+            <div className="p-4 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300 rounded mx-auto max-w-4xl mt-8">
+                <h1 className="font-bold">Chyba:</h1> {error}
+            </div>
+        );
+    }
+    if (!user || status !== 'approved') { /* ... Access Denied UI ... */
+        return (
+            <div className="p-8 text-center bg-white dark:bg-zinc-800 rounded-lg shadow-xl mx-auto max-w-md mt-10">
+                <h1 className="text-2xl text-red-600 dark:text-red-400 font-bold">Přístup odepřen</h1>
+                <p className="text-gray-600 dark:text-zinc-400 mt-2">Musíte být schválený uživatel pro přístup k jízdním řádům.</p>
+            </div>
+        );
+    }
+
+
+    return (
+      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 p-4 sm:p-8">
+        <div className="max-w-7xl mx-auto">
+          <h1 className="text-2xl sm:text-4xl font-bold mb-6 sm:mb-8 text-gray-800 dark:text-zinc-50 border-b-2 border-blue-700 pb-2 flex items-center">
+            <span className='text-2xl'>Jízdní Řády</span> {isAdmin && <span className="text-2xl text-red-500">(ADMIN)</span>}
+          </h1>
+
+          <JizdniRadFilters
+            filters={draftFilters}
+            onFilterChange={(newFilters: Partial<Filters>) => setDraftFilters(prev => ({ ...prev, ...newFilters }))}
+            onSearch={() => setAppliedFilters(draftFilters)}
+            isLoading={isLoadingData}
+          />
+
+          {jizdniRady.length === 0 ? (
+            <div className="bg-white dark:bg-zinc-800 p-6 rounded-xl shadow-lg text-center text-gray-600 dark:text-zinc-400">
+              Nebyly nalezeny žádné jízdní řády odpovídající vašim kritériím.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {jizdniRady.map((jizdniRad) => (
+                <div
+                  key={`${jizdniRad.line_number}-${jizdniRad.course_number}-${jizdniRad.day_type}`}
+                  className="bg-white dark:bg-zinc-800 rounded-xl shadow-lg border border-gray-200 dark:border-zinc-700 overflow-hidden hover:shadow-2xl transition-shadow duration-300 flex flex-col relative"
+                >
+
+                  {/* ADMIN PANEL: Tlačítka pro úpravu a smazání */}
+                  {isAdmin && (
+                      <div className="absolute top-0 right-0 p-2 z-10 space-x-2">
+                          <button
+                              onClick={() => openEditModal(jizdniRad)}
+                              className="p-1.5 bg-yellow-500 text-white rounded-full hover:bg-yellow-600 transition shadow-md"
+                              title="Editovat jízdní řád"
+                          >
+                              <Edit size={16} />
+                          </button>
+                          <button
+                              onClick={() => handleDelete(jizdniRad)}
+                              className="p-1.5 bg-red-600 text-white rounded-full hover:bg-red-700 transition shadow-md"
+                              title="Smazat jízdní řád"
+                          >
+                              <Trash2 size={16} />
+                          </button>
+                      </div>
+                  )}
+
+                  {/* Hlavička a Tělo - (zůstává stejné) */}
+                   <div className="p-4 bg-blue-50 dark:bg-blue-900/50 border-b border-gray-200 dark:border-zinc-700">
+                      <h3 className="text-2xl font-extrabold mb-1 text-blue-700 dark:text-blue-300">{jizdniRad.line_number}/{jizdniRad.course_number}</h3>
+                      <p className="text-gray-600 dark:text-zinc-400 text-sm">
+                          <span className="font-semibold">Dny:</span> {jizdniRad.day_type === 'pracovni' ? 'Pracovní dny' : 'Víkend'}
+                      </p>
+                      <p className="text-gray-600 dark:text-zinc-400 text-sm">
+                          <span className="font-semibold">Typ:</span> {jizdniRad.transport_type === 'autobus' ? 'Autobus 🚌' : 'Tramvaj 🚋'}
+                      </p>
+                  </div>
+
+                  <div className="p-4 flex-grow">
+                      <div className="flex flex-col sm:flex-row gap-4">
+
+                          {/* RANNÍ ČÁST */}
+                          <div className="flex-1 min-w-0">
+                              <h4 className="font-bold text-lg text-gray-800 dark:text-zinc-50 mb-2 text-center">Ranní</h4>
+                              {jizdniRad.files.ranni ? (
+                                  <div
+                                      onClick={() => openModal(jizdniRad.files.ranni!.image_url, `JŘ Ranní ${jizdniRad.line_number}/${jizdniRad.course_number}`)}
+                                      className="block border border-gray-300 dark:border-zinc-700 rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-shadow cursor-pointer"
+                                  >
+                                      <div className="relative w-full aspect-[4/3] bg-gray-200 dark:bg-zinc-700">
+                                          <Image
+                                              src={jizdniRad.files.ranni.image_url}
+                                              alt={`Náhled Ranní JŘ Linka ${jizdniRad.line_number}`}
+                                              layout="fill"
+                                              objectFit="contain"
+                                              className="rounded-lg" loading="lazy"
+                                              unoptimized
+                                          />
+                                      </div>
+                                  </div>
+                              ) : (
+                                  <div className="w-full aspect-[4/3] bg-gray-100 dark:bg-zinc-700 flex items-center justify-center text-gray-500 dark:text-zinc-400 rounded-lg border border-dashed border-gray-300 dark:border-zinc-600">
+                                      Není nahráno
+                                  </div>
+                              )}
+                          </div>
+
+                          {/* ODPOLEDNÍ ČÁST */}
+                          <div className="flex-1 min-w-0">
+                              <h4 className="font-bold text-lg text-gray-800 dark:text-zinc-50 mb-2 text-center mt-4 sm:mt-0">Odpolední</h4>
+                              {jizdniRad.files.odpoledni ? (
+                                  <div
+                                      onClick={() => openModal(jizdniRad.files.odpoledni!.image_url, `JŘ Odpolední ${jizdniRad.line_number}/${jizdniRad.course_number}`)}
+                                      className="block border border-gray-300 dark:border-zinc-700 rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-shadow cursor-pointer"
+                                  >
+                                      <div className="relative w-full aspect-[4/3] bg-gray-200 dark:bg-zinc-700">
+                                          <Image
+                                              src={jizdniRad.files.odpoledni.image_url}
+                                              alt={`Náhled Odpolední JŘ Linka ${jizdniRad.line_number}`}
+                                              layout="fill"
+                                              objectFit="contain"
+                                              className="rounded-lg" loading="lazy"
+                                              unoptimized
+                                          />
+                                      </div>
+                                  </div>
+                              ) : (
+                                  <div className="w-full aspect-[4/3] bg-gray-100 dark:bg-zinc-700 flex items-center justify-center text-gray-500 dark:text-zinc-400 rounded-lg border border-dashed border-gray-300 dark:border-zinc-600">
+                                      Není nahráno
+                                  </div>
+                              )}
+                          </div>
+                      </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Vykreslení modálního okna náhledu */}
+        <ImageModal
+            isOpen={isModalOpen}
+            imageUrl={modalImageUrl}
+            onClose={closeModal}
+            altText={modalAltText}
+        />
+
+        {/* Vykreslení modálního okna pro EDITACI */}
+        <EditTimetableModal
+            isOpen={isEditModalOpen}
+            onClose={closeEditModal}
+            initialData={editData}
+            onSaveSuccess={fetchJizdniRady}
+        />
+      </div>
+    );
+
+};
+
+export default JizdniRadyPage;
+
+// src/app/user-portal/layout.tsx
+
+'use client';
+
+import { useAuth } from '@/context/AuthContext';
+import { useRouter, usePathname } from 'next/navigation'; // <-- Přidán usePathname
+import { useEffect } from 'react';
+import { GridLoader } from 'react-spinners';
+
+const UserPortalLayout = ({ children }: { children: React.ReactNode }) => {
+const { user, isLoading, is_blocked, status } = useAuth();
+const router = useRouter();
+const pathname = usePathname(); // <-- Získání aktuální cesty
+
+const PENDING_PATH = '/pending-info';
+const BLOCKED_PATH = '/blocked';
+const DEFAULT_PORTAL_PATH = '/user-portal/tables'; // Předpokládaná domovská stránka portálu
+
+useEffect(() => {
+console.log("AKTUALNI STAVY: ",status," Blokovaný: ", is_blocked, " Cesta: ",pathname);
+if (isLoading) return;
+
+    // 1. KONTROLA, ZDA JE UŽIVATEL PŘIHLÁŠEN
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+
+    // 2. KONTROLA BLOKOVANÉHO UŽIVATELE (is_blocked = true)
+    if (is_blocked) {
+      if (pathname !== BLOCKED_PATH) {
+        router.push(BLOCKED_PATH);
+      }
+      return;
+    }
+
+    // 3. KONTROLA NESSCHVÁLENÉHO UŽIVATELE (status = 'pending')
+    if (status === 'pending') {
+      // Pokud UŽIVATEL ČEKÁ a NENÍ na informační stránce, přesměruj ho tam.
+      if (pathname !== PENDING_PATH) {
+        router.push(PENDING_PATH);
+      }
+      return; // Ukončíme, aby se nevykonávala další logika
+    }
+
+    // 4. KONTROLA SCHVÁLENÉHO UŽIVATELE (status = 'approved')
+    // Zde je oprava: Schválený uživatel NESMÍ ZŮSTAT na chybových/informačních stránkách.
+    if (status === 'approved') {
+      // Pokud je UŽIVATEL SCHVÁLEN a je stále na stránce pro ČEKÁNÍ nebo BLOKOVÁNÍ
+      if (pathname === PENDING_PATH || pathname === BLOCKED_PATH) {
+        // Přesměruj ho na hlavní portál (např. /user-portal)
+        router.push(DEFAULT_PORTAL_PATH);
+        return;
+      }
+    }
+
+    // 5. Pokud je vše v pořádku (Approved a není na chybové stránce), vykreslí se children.
+
+// Důležité: Přidány proměnné is_blocked, status a pathname do závislostí
+}, [user, isLoading, is_blocked, status, router, pathname]);
+
+if (isLoading) {
+// Vykreslení načítací obrazovky
+return (
+<div className="flex justify-center items-center h-screen bg-gray-50">
+<GridLoader color="#0066ff" size={15} />
+<p className='ml-4'>Načítám uživatelský stav...</p>
+</div>
+);
+}
+
+// Blokování vykreslení obsahu pro neschválené/blokované uživatele
+if (!user || is_blocked || status === 'pending') {
+// Vrátíme null, aby se nevykreslil chráněný obsah, pokud se čeká na přesměrování
+return null;
+}
+
+// Vykreslení obsahu pro schválené a neblokované uživatele
+return <>{children}</>;
+};
+
+export default UserPortalLayout;
+
+@import "tailwindcss";
+
+:root {
+--background: #ffffff;
+--foreground: #171717;
+}
+
+@theme inline {
+--color-background: var(--background);
+--color-foreground: var(--foreground);
+--font-sans: var(--font-geist-sans);
+--font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+:root {
+--background: #0a0a0a;
+--foreground: #ededed;
+}
+}
+
+body {
+background: var(--background);
+color: var(--foreground);
+font-family: Arial, Helvetica, sans-serif;
+}
+
+// src/app/layout.tsx
+
+import { AuthProvider } from '@/context/AuthContext';
+import './globals.css';
+import Navigace from '@/components/Navigation'; // <-- 1. IMPORTUJTE KOMPONENTU
+import AnnouncementBanner from '@/components/common/AnnouncementBanner'; // Import banneru
+
+export default function RootLayout({
+children,
+}: {
+children: React.ReactNode;
+}) {
+return (
+<html lang="cs">
+<body>
+<AuthProvider>
+
+          {/* 2. VLOŽTE KOMPONENTU NAVIGACE PŘED DĚTI (children) */}
+          {/* Navigace se zobrazí na každé stránce obalené tímto layoutem */}
+          <Navigace />
+          <AnnouncementBanner /> {/* Vložení banneru */}
+          {/* 3. children představuje obsah aktuální stránky (např. src/app/page.tsx) */}
+          <main>
+              {children}
+          </main>
+
+        </AuthProvider>
+      </body>
+    </html>
+
+);
+}
+
+import Image from "next/image";
+import { MessageCircle, File, MapPin, Table } from "lucide-react";
+
+export default function About() {
+const Feature = ({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) => (
+// **Responsivní a dark mód styly pro kartu funkcí**
+<div className="flex flex-col items-center text-center p-6 border border-gray-200 dark:border-zinc-700 rounded-xl shadow-lg hover:shadow-xl transition-shadow duration-300 bg-white dark:bg-zinc-800">
+<div className="text-blue-600 dark:text-blue-400 mb-4">{icon}</div>
+<h3 className="max-w-4xl mx-auto text-2xl font-bold mb-6 text-gray-800 dark:text-gray-100 border-b pb-2">{title}</h3>
+<p className="text-gray-600 dark:text-zinc-300 text-sm">{children}</p>
+</div>
+);
+
+return (
+// **Hlavní kontejner s dark módem a minimální výškou**
+<div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-900 p-4 sm:p-8">
+
+      {/* **Centrální karta obsahu** */}
+      <main className="w-full max-w-4xl flex flex-col items-center justify-center p-6 sm:p-10 md:p-12 bg-white dark:bg-zinc-800 shadow-2xl rounded-2xl">
+
+        {/* **Nadpis** */}
+        <h2 className="max-w-4xl mx-auto text-3xl font-bold mb-6 text-gray-800 dark:text-gray-100 border-b pb-2">
+          O aplikaci DpMost Portál
+        </h2>
+
+        {/* **Úvodní text** */}
+        <p className="max-w-xl text-base sm:text-lg leading-relaxed text-zinc-600 dark:text-zinc-400 text-center mb-10">
+          MHD Portál je moderní webová platforma navržená speciálně pro řidiče
+          autobusů a tramvají. Naším cílem je zjednodušit přístup k důležitým
+          informacím, usnadnit komunikaci a poskytnout všechny potřebné nástroje
+          na jednom místě.
+        </p>
+
+        {/* **Sekce Klíčové funkce** */}
+        <div className="w-full">
+          <h3 className="text-2xl sm:text-3xl font-bold text-center mb-8 text-gray-800 dark:text-zinc-50">
+            Klíčové funkce
+          </h3>
+
+          {/* **Responsivní Mřížka (Grid): 1 sloupec na mobilu, 2 na tabletu/desktopu** */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
+            <Feature icon={<MessageCircle size={28} />} title="Nástěnka (Chat)">
+              Rychlá a jednoduchá komunikace s kolegy. Sdílejte důležité
+              informace, vzkazy a postřehy z provozu v reálném čase.
+            </Feature>
+            <Feature icon={<File size={28} />} title="Správa dokumentů">
+              Všechny důležité manuály, příručky, směrnice a tabulky bezpečně
+              uložené a dostupné kdykoliv ke stažení.
+            </Feature>
+            <Feature icon={<Table size={28} />} title="Tabulky">
+              Fotogalérie provozních tabulek pro řidiče MHD.
+            </Feature>
+            <Feature
+              icon={<MapPin size={28} />}
+              title="Interaktivní mapa"
+            >
+              Přehledná mapa všech zastávek a linek s detailními informacemi po
+              kliknutí.
+            </Feature>
+          </div>
+        </div>
+      </main>
+    </div>
+
+);
+}
+
+// src/components/chat/ChatComponent.tsx
+'use client';
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { Send, Trash2 } from 'lucide-react';
+
+interface Message {
+id: string;
+user_id: string;
+author_name: string;
+content: string;
+created_at: string;
+username: string;
+}
+
+interface ChatProps {
+currentUserId: string;
+
+}
+
+const ChatComponent: React.FC<ChatProps> = ({ currentUserId }) => {
+const { user, role } = useAuth();
+const [messages, setMessages] = useState<Message[]>([]);
+const [newMessage, setNewMessage] = useState('');
+const [loading, setLoading] = useState(true);
+const [error, setError] = useState<string | null>(null);
+const chatEndRef = useRef<HTMLDivElement>(null);
+
+//console.log("INFORMACE O USER: ", user?.user_metadata.full_name);
+// --------------------------------------------------
+// 1. ZÍSKÁNÍ A REALTIME AKTUALIZACE ZPRÁV
+// --------------------------------------------------
+// Získání jména autora (pro jednoduchost použijeme email prefix nebo roli)
+const getAuthorName = useCallback((userId: string) => {
+if (userId === user?.id) {
+return `${user.email?.split('@')[0] ?? 'Já'} (${role === 'admin' ? 'Admin' : 'Řidič'})`;
+}
+// V reálném projektu by se zde četlo jméno z tabulky 'profiles'
+return userId.substring(0, 8); // Zkrácené ID pro ostatní
+}, [user, role]);
+
+// Načte prvních 50 zpráv
+const fetchMessages = useCallback(async () => {
+const { data, error } = await supabase
+.from('messages')
+.select(`id, user_id, content, created_at, author_name`)
+.order('created_at', { ascending: true })
+.limit(50);
+
+    if (error) {
+      console.error('Chyba při načítání zpráv:', error);
+      setError('Nepodařilo se načíst zprávy.');
+    } else {
+      setMessages(data as Message[]);
+    }
+    setLoading(false);
+
+}, []);
+
+// Posun na konec chatu
+const scrollToBottom = () => {
+chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+};
+
+useEffect(() => {
+fetchMessages();
+}, [fetchMessages]);
+
+// Zajištění automatického posunu při každé aktualizaci (odeslání/realtime)
+useEffect(() => {
+scrollToBottom();
+}, [messages]);
+
+// **KLÍČOVÉ PRO AUTOMATICKOU AKTUALIZACI: Supabase Realtime**
+useEffect(() => {
+const channel = supabase
+.channel('chat-public') // Název kanálu
+.on(
+'postgres_changes',
+{ event: '\*', schema: 'public', table: 'messages' }, // Sledujeme INSERT/DELETE na tabulce messages
+(payload) => {
+// Úspěšná operace: Automatická aktualizace zobrazení zpráv
+// Pro jednoduchost celé řešení znovu načteme, ale u velkého chatu
+// by se optimalizovalo na pouhé přidání/odebrání jedné zprávy.
+fetchMessages();
+}
+)
+.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+
+}, [fetchMessages]);
+
+// --------------------------------------------------
+// 2. ODESLÁNÍ ZPRÁVY
+// --------------------------------------------------
+const handleSendMessage = async (e: React.FormEvent) => {
+e.preventDefault();
+if (!newMessage.trim() || !user) return;
+
+    // Poznámka: Kontrola, zda uživatel.username existuje je nezbytná.
+    // Předpokládáme, že je načteno v AuthContextu.
+    if (!user.user_metadata.full_name) {
+        setError('Nelze odeslat zprávu: Chybí uživatelské jméno.');
+        return;
+    }
+
+    const { error: insertError } = await supabase
+      .from('messages')
+      .insert({
+        user_id: user.id,
+        author_name: getAuthorName(user.id),
+        content: newMessage.trim(),
+      });
+
+    if (insertError) {
+      setError('Chyba při odesílání zprávy.');
+      console.error(insertError);
+    } else {
+      // Realtime zajistí aktualizaci, jen vyčistíme input
+      setNewMessage('');
+    }
+
+};
+
+// --------------------------------------------------
+// 3. MAZÁNÍ ZPRÁVY (POUZE PRO ADMINY)
+// --------------------------------------------------
+const handleDeleteMessage = async (messageId: string) => {
+if (!role || !confirm('Opravdu chcete tuto zprávu smazat?')) return;
+
+    const { error: deleteError } = await supabase
+      .from('messages')
+      .delete()
+      .eq('id', messageId);
+
+    if (deleteError) {
+      setError('Chyba při mazání zprávy.');
+      console.error(deleteError);
+    }
+    // Realtime zajistí aktualizaci, není potřeba manuálně volat fetchMessages.
+
+};
+
+if (loading) {
+return <div className="flex items-center justify-center h-full text-gray-500">Načítám zprávy...</div>;
+}
+
+return (
+<div className="flex flex-col h-full">
+{/_ Oblast zpráv _/}
+<div className="flex-grow overflow-y-auto p-4 space-y-4 bg-gray-50">
+{error && <div className="p-3 bg-red-100 text-red-700 rounded-md">{error}</div>}
+
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            className={`flex ${msg.user_id === currentUserId ? 'justify-end' : 'justify-start'}`}
+          >
+            <div className={`max-w-xs md:max-w-md p-3 rounded-xl shadow-md relative group ${
+                msg.user_id === currentUserId
+                ? 'bg-blue-600 text-white rounded-br-none'
+                : 'bg-white text-gray-800 rounded-tl-none border'
+            }`}>
+
+              {/* Jméno a čas */}
+              <div className="text-xs mb-1 font-semibold opacity-80 flex justify-between items-center">
+                <span className={msg.user_id === currentUserId ? 'text-blue-200' : 'text-gray-500'}>
+                    {msg.user_id === currentUserId ? ' Já ' : msg.author_name}
+                </span>
+                <span className={msg.user_id === currentUserId ? 'text-blue-300' : 'text-gray-400'}>
+                    {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+
+              {/* Obsah zprávy */}
+              <p className="text-sm break-words whitespace-pre-wrap">{msg.content}</p>
+              {/* Tlačítko pro mazání (pouze admin) */}
+              {role==="admin" && (
+                <button
+                  onClick={() => handleDeleteMessage(msg.id)}
+                  className="absolute top-0.5 right-0.5 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Smazat zprávu (Admin)"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        <div ref={chatEndRef} /> {/* Pomocný prvek pro posun */}
+      </div>
+
+      {/* Vstupní pole */}
+      <form onSubmit={handleSendMessage} className="p-4 border-t bg-white flex items-center">
+        <input
+          type="text"
+          value={newMessage}
+          onChange={(e) => setNewMessage(e.target.value)}
+          placeholder="Napište zprávu..."
+          className="flex-grow border border-gray-300 rounded-full py-2 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 mr-3"
+          disabled={!user || !user.user_metadata.full_name}
+        />
+        <button
+          type="submit"
+          disabled={!newMessage.trim() || !user || !user.user_metadata.full_name}
+          className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition disabled:bg-gray-400"
+        >
+          <Send className="w-5 h-5" />
+        </button>
+      </form>
+    </div>
+
+);
+};
+
+export default ChatComponent;
+
+// src/components/AnnouncementBanner.tsx
+'use client';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { X, Bell, Loader2 } from 'lucide-react';
+
+// --- TYPY DAT ---
+interface Announcement {
+id: string;
+title: string;
+content: string;
+priority: number;
+}
+
+const AnnouncementBanner: React.FC = () => {
+const { user, status, role, isLoading: isAuthLoading } = useAuth();
+const [unreadAnnouncements, setUnreadAnnouncements] = useState<Announcement[]>([]);
+const [isLoading, setIsLoading] = useState(true);
+const [isDismissing, setIsDismissing] = useState<string | null>(null); // ID právě odstraňovaného oznámení
+
+    // Funkce pro načtení nepřečtených oznámení
+    const fetchUnreadAnnouncements = useCallback(async () => {
+        if (isAuthLoading || !user || status !== 'approved') {
+            setIsLoading(false);
+            setUnreadAnnouncements([]);
+            return;
+        }
+
+        setIsLoading(true);
+
+        // 1. Určení cílové role pro dotaz
+        const targetRoles = ['all', role].filter((r): r is 'all' | 'admin' | 'user' => r === 'all' || r === 'admin' || r === 'user');
+
+        // 2. Načtení ID oznámení, které uživatel JIZ PŘEČETL
+        const { data: readIdsData, error: readError } = await supabase
+            .from('user_announcement_reads')
+            .select('announcement_id')
+            .eq('user_id', user.id); // Klíčové: filtrujeme na aktuálního uživatele
+
+        if (readError) {
+            console.error('Chyba při načítání přečtených ID:', readError);
+            setIsLoading(false);
+            return;
+        }
+
+        const readAnnouncementIds = readIdsData?.map(r => r.announcement_id) || [];
+
+        // Zde použijeme "NOT IN" na straně Supabase, pokud je seznam čtených ID neprázdný
+        let query = supabase
+            .from('portal_announcements')
+            .select(`id, title, content, priority`)
+            .eq('is_active', true)
+            .in('target_role', targetRoles)
+            .order('priority', { ascending: false });
+
+        // 3. Aplikace filtru pro nepřečtené (pomocí .not().in())
+        if (readAnnouncementIds.length > 0) {
+            query = query.not('id', 'in', `(${readAnnouncementIds.join(',')})`);
+        }
+
+        const { data: announcements, error: fetchError } = await query;
+
+        if (fetchError) {
+            console.error('Chyba při načítání oznámení:', fetchError);
+            setIsLoading(false);
+            return;
+        }
+
+        // 4. Nastavení nepřečtených oznámení
+        setUnreadAnnouncements(announcements as Announcement[] || []);
+        setIsLoading(false);
+
+    }, [isAuthLoading, user, status, role]);
+
+    useEffect(() => {
+        fetchUnreadAnnouncements();
+    }, [fetchUnreadAnnouncements]);
+
+    // Funkce pro označení oznámení jako přečteného (Dismiss)
+    const handleDismiss = useCallback(async (announcementId: string) => {
+        if (!user) return;
+
+        setIsDismissing(announcementId);
+
+        try {
+            // Vložení záznamu do propojovací tabulky
+            const { error: insertError } = await supabase
+                .from('user_announcement_reads')
+                .insert({
+                    user_id: user.id, // Klíčové: Uložení vazby na AKTUALNIHO UŽIVATELE
+                    announcement_id: announcementId,
+                });
+
+            if (insertError) throw insertError;
+
+            // Odebrání z lokálního stavu
+            setUnreadAnnouncements(prev => prev.filter(a => a.id !== announcementId));
+
+        } catch (err) {
+            console.error('Chyba při označování jako přečteno:', err);
+            // Můžete přidat zobrazení chyby uživateli
+        } finally {
+            setIsDismissing(null);
+        }
+    }, [user]);
+
+    // Ochrana: Nejsou oznámení, čekáme na ověření, nebo je uživatel blokovaný
+    if (isAuthLoading || isLoading || unreadAnnouncements.length === 0 || status !== 'approved') {
+        return null;
+    }
+
+    // Zobrazení všech nepřečtených oznámení (seřazených podle priority)
+    return (
+        <div className="w-full max-w-7xl mx-auto p-4 space-y-4">
+            {unreadAnnouncements.map((announcement) => (
+                <div
+                    key={announcement.id}
+                    className="flex items-start bg-blue-50 dark:bg-blue-900 border-l-4 border-blue-600 dark:border-blue-400 p-4 rounded-lg shadow-md transition-all duration-300"
+                >
+                    <Bell size={20} className="text-blue-600 dark:text-blue-400 mt-0.5 mr-3 flex-shrink-0" />
+
+                    <div className="flex-grow">
+                        <h4 className="text-lg font-bold text-blue-800 dark:text-blue-200">
+                           {announcement.title}
+                           {announcement.priority > 1 && <span className="ml-2 text-xs font-semibold bg-red-500 text-white px-2 py-0.5 rounded-full">DŮLEŽITÉ</span>}
+                        </h4>
+                        <p className="text-sm text-blue-700 dark:text-blue-300 mt-1 whitespace-pre-wrap">
+                            {announcement.content}
+                        </p>
+                    </div>
+
+                    <button
+                        onClick={() => handleDismiss(announcement.id)}
+                        disabled={isDismissing === announcement.id}
+                        className="ml-4 flex-shrink-0 p-1 rounded-full text-blue-600 hover:bg-blue-200 dark:text-blue-400 dark:hover:bg-blue-800 transition disabled:opacity-50"
+                        title="Označit jako přečteno"
+                    >
+                        {isDismissing === announcement.id ? <Loader2 size={20} className="animate-spin" /> : <X size={20} />}
+                    </button>
+                </div>
+            ))}
+        </div>
+    );
+
+};
+
+export default AnnouncementBanner;
+
+// src/components/common/UserProfileModal.tsx
+import React from 'react';
+import { Role } from '@/context/AuthContext'; // Importujte Role type
+import { X, User as UserIcon, Briefcase, CheckCircle, Clock, Mail } from 'lucide-react';
+
+interface UserData {
+email: string;
+full_name: string | null;
+role: Role;
+status: 'pending' | 'approved';
+is_blocked: boolean;
+}
+
+interface UserProfileModalProps {
+userData: UserData; // Data získaná z useAuth()
+isOpen: boolean;
+onClose: () => void;
+}
+
+const UserProfileModal: React.FC<UserProfileModalProps> = ({ userData, isOpen, onClose }) => {
+
+    if (!isOpen || !userData) return null;
+
+    // Funkce pro formátování statusu
+    const getStatusDisplay = (status: 'pending' | 'approved', isBlocked: boolean) => {
+        if (isBlocked) {
+            return { text: 'Blokovaný ⛔', color: 'text-red-600' };
+        }
+        switch (status) {
+            case 'approved':
+                return { text: 'Schválený ✅', color: 'text-green-600' };
+            case 'pending':
+                return { text: 'Čekající ⏳', color: 'text-yellow-600' };
+            default:
+                return { text: 'Neznámý', color: 'text-gray-500' };
+        }
+    };
+
+    const { text: statusText, color: statusColor } = getStatusDisplay(userData.status, userData.is_blocked);
+
+    return (
+        // Overlay
+        <div
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 transition-opacity duration-300"
+            onClick={onClose}
+        >
+            {/* Modal Content */}
+            <div
+                className="bg-white rounded-lg shadow-2xl w-full max-w-md p-6 transform transition-all duration-300 scale-100"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="flex justify-between items-center border-b pb-3 mb-4">
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center">
+                        <UserIcon className="w-6 h-6 mr-2 text-blue-600" />
+                        Detail uživatele
+                    </h2>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+                        <X className="w-6 h-6" />
+                    </button>
+                </div>
+
+                <div className="space-y-4">
+                    {/* Zobrazení celého jména (pokud existuje) nebo username */}
+                    <div className="flex items-center">
+                        <UserIcon className="w-5 h-5 mr-3 text-blue-500" />
+                        <div>
+                            <p className="text-sm font-medium text-gray-500">
+                                {userData.full_name ? 'Jméno a Příjmení' : 'Uživatelské jméno'}
+                            </p>
+                            <p className="text-lg font-semibold text-gray-900">
+                                {userData.full_name || userData.email?.split('@')[0] || 'N/A'}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Role */}
+                    <div className="flex items-center">
+                        <Briefcase className="w-5 h-5 mr-3 text-blue-500" />
+                        <div>
+                            <p className="text-sm font-medium text-gray-500">Role</p>
+                            <p className="text-lg font-semibold text-gray-900 capitalize">
+                                {userData.role === 'admin' ? 'Administrátor 👑' : 'Řidič / Uživatel 🚌'}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Status schválení */}
+                    <div className="flex items-center">
+                        <CheckCircle className="w-5 h-5 mr-3 text-blue-500" />
+                        <div>
+                            <p className="text-sm font-medium text-gray-500">Status účtu</p>
+                            <p className={`text-lg font-bold ${statusColor}`}>{statusText}</p>
+                        </div>
+                    </div>
+
+                    {/* Email */}
+                    <div className="flex items-center border-t pt-4">
+                         <Mail className="w-5 h-5 mr-3 text-gray-500" />
+                         <div>
+                            <p className="text-sm font-medium text-gray-500">Email</p>
+                            <p className="text-gray-700 break-words">{userData.email}</p>
+                         </div>
+                    </div>
+                </div>
+
+                <div className="mt-6 pt-4 border-t">
+                    <button
+                        onClick={onClose}
+                        className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition font-semibold"
+                    >
+                        Zavřít
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+
+};
+
+export default UserProfileModal;
+
+// src/components/Navigace.tsx
+
+'use client';
+
+import React, { useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import Link from 'next/link';
+import { useRouter, usePathname } from 'next/navigation'; // Přidán usePathname
+import { supabase } from '@/lib/supabase/client';
+// Importujeme ikony pro navigaci, uživatele a hamburger menu
+import { BusFront, Loader2 , LogOut, User as UserIcon, Menu, X } from 'lucide-react';
+import UserProfileModal from '@/components/common/UserProfileModal';
+
+const Navigace = () => {
+const { user, role, full_name, status, is_blocked, isLoading } = useAuth();
+const [loading, setLoading] = useState(false);
+const [isModalOpen, setIsModalOpen] = useState(false);
+// NOVÝ STAV: pro řízení mobilního menu
+const [isMenuOpen, setIsMenuOpen] = useState(false);
+const router = useRouter();
+const pathname = usePathname(); // Získáme aktuální cestu
+
+    // Logika pro zobrazení
+    const isAuthenticated = user !== null;
+    const isUserOrAdmin = role === 'user' || role === 'admin';
+    const isAdmin = role === 'admin';
+
+    // Logika pro zobrazení jména v navigaci
+    const displayName = full_name || user?.email?.split('@')[0] || 'Uživatel';
+
+    // Data pro modal
+    const userDataForModal = user ? {
+        email: user.email || 'N/A',
+        full_name,
+        role,
+        status: status as ('pending' | 'approved'),
+        is_blocked,
+    } : null;
+
+    // --- FUNKCE PRO ODHLÁŠENÍ ---
+    const handleLogout = async () => {
+        setLoading(true);
+        const { error } = await supabase.auth.signOut();
+        setLoading(false);
+        if (error) {
+            console.error("Chyba při odhlašování:", error.message);
+        } else {
+            // Zavřeme modal i menu před přesměrováním
+            setIsModalOpen(false);
+            setIsMenuOpen(false);
+            router.push('/');
+        }
+    };
+
+    // Funkce pro určení třídy odkazu
+    const getLinkClass = (href: string, baseClasses: string = 'text-gray-700 hover:text-blue-600') => {
+        const isActive = pathname === href;
+        return `${baseClasses} transition duration-150 ${isActive ? 'text-blue-600 font-bold border-b-2 border-blue-600' : ''}`;
+    };
+
+    // --- Seznam odkazů ---
+    const navLinks = (
+        <>
+            <Link href="/" className={getLinkClass('/', 'text-black hover:text-blue-600')}>Úvod</Link>
+            <Link href="/maps" className={getLinkClass('/maps', 'text-black hover:text-blue-600')}>Mapa linek</Link>
+            <Link href="/contact" className={getLinkClass('/contact', 'text-black hover:text-blue-600')}>Kontakt</Link>
+
+            {isUserOrAdmin && (
+            <>
+                <Link href="/user-portal/documents" className={getLinkClass('/user-portal/documents', 'text-black hover:text-blue-600')}>Dokumenty</Link>
+                <Link href="/user-portal/tables" className={getLinkClass('/user-portal/tables', 'text-black hover:text-blue-600')}>Tabulky</Link>
+                <Link href="/user-portal/chat" className={getLinkClass('/user-portal/chat', 'text-black hover:text-blue-600')}>Chat</Link>
+            </>
+            )}
+
+            {isAdmin && (
+                <Link href="/admin/dashboard" className="text-red-500 hover:text-red-700 font-bold transition duration-150">ADMIN</Link>
+            )}
+        </>
+    );
+
+    // --- Akce přihlášení/profilu ---
+    const authActions = (
+        <div>
+            {isAuthenticated ? (
+                <div className="text-black flex items-center space-x-3">
+                    {/* KLIKATELNÉ JMÉNO / PROFIL */}
+                    <button
+                        onClick={() => { setIsModalOpen(true); setIsMenuOpen(false); }}
+                        className="text-gray-700 hover:text-blue-600 font-semibold flex items-center p-1 rounded-md transition duration-150"
+                        title="Zobrazit detaily profilu"
+                    >
+                        <UserIcon className="w-5 h-5 mr-1" />
+                        <span className="hidden sm:inline">{displayName}</span>
+                    </button>
+
+                    <button
+                        onClick={handleLogout}
+                        className="bg-red-500 text-white px-3 py-2 rounded hover:bg-red-600 text-sm disabled:opacity-50 flex items-center transition duration-150"
+                        disabled={loading}
+                    >
+                        {loading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <LogOut className="w-4 h-4 mr-1" />}
+                        <span className="hidden sm:inline">{loading ? 'Odpojuji...' : 'Odhlásit'}</span>
+                        <span className="sm:hidden">{loading ? '...' : 'Odhlásit'}</span>
+                    </button>
+                </div>
+            ) : (
+                <Link href="/login" className="bg-yellow-400 text-gray-900 px-3 py-2 rounded hover:bg-yellow-500 font-medium transition duration-150" onClick={() => setIsMenuOpen(false)}>
+                    Přihlásit
+                </Link>
+            )}
+        </div>
+    );
+
+
+    return (
+    <nav
+        // Použijeme tvůj upravený styl pro bílou s mírným stínem
+        className="bg-white p-4 shadow-xl shadow-gray-500/20 flex justify-center items-center z-50 sticky top-0"
+    >
+        <div className="flex justify-between items-center w-full max-w-7xl">
+            {/* Logo a Název (VŽDY VIDITELNÉ) */}
+            <div className="text-xl font-bold flex items-center">
+                <Link href="/" className="hover:text-blue-900 transition duration-150 flex items-center">
+                    {/* ZMĚNA ZDE: Ikona BusFront je před textem a je zarovnána vodorovně */}
+                    <BusFront className='w-7 h-7 mr-2 text-blue-600' />
+                    <span className='hidden lg:flex text-gray-900'>DpMost Portál</span>
+                </Link>
+            </div>
+
+            {/* Odkazy (Pouze na Dektopy, skryté na mobilu) */}
+            <div className="hidden lg:flex items-center space-x-6">
+                <div className="flex space-x-6">
+                    {navLinks}
+                </div>
+                {authActions}
+            </div>
+
+            {/* Mobilní: Hamburger Button a Akce (viditelné na mobilu, skryté na desktopu) */}
+            <div className="flex items-center lg:hidden space-x-3">
+                {authActions}
+                <button
+                    onClick={() => setIsMenuOpen(!isMenuOpen)}
+                    className="p-2 rounded-md text-gray-700 hover:bg-gray-100"
+                    aria-label="Toggle menu"
+                >
+                    {isMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+                </button>
+            </div>
+        </div>
+
+        {/* Mobilní Menu (Vyskakovací panel) */}
+        {isMenuOpen && (
+            <div
+                className="absolute top-full left-0 w-full bg-white shadow-lg lg:hidden border-t border-gray-200"
+                onClick={() => setIsMenuOpen(false)} // Zavřít menu po kliknutí
+            >
+                <div className="flex flex-col space-y-2 p-4">
+                    {/* Odkazy v mobilním menu */}
+                    {navLinks}
+                </div>
+            </div>
+        )}
+
+        {/* KOMPONENTA MODALU */}
+        {userDataForModal && (
+            <UserProfileModal
+                userData={userDataForModal}
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+            />
+        )}
+    </nav>
+
+);
+};
+
+export default Navigace;
+
+// src/context/AuthContext.tsx
+
+'use client';
+
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { Session, User } from '@supabase/supabase-js';
+
+// --- TYPY ---
+export type Role = 'ghost' | 'user' | 'admin';
+
+// Definice struktury dat, která se stáhnou z tabulky 'profiles'
+interface ProfileData {
+role: Role;
+full_name: string | null;
+status: 'pending' | 'approved';
+is_blocked: boolean;
+}
+
+interface AuthState {
+session: Session | null;
+user: User | null;
+full_name: string | null;
+role: Role;
+isLoading: boolean;
+status: 'pending' | 'approved';
+is_blocked: boolean;
+}
+
+const AuthContext = createContext<AuthState | undefined>(undefined);
+
+// --- ASYNCHRONNÍ FUNKCE PRO ZÍSKÁNÍ ROLE A JMÉNA Z DATABÁZE ---
+// Tato funkce nyní vrací obě hodnoty.
+const fetchUserProfileData = async (user: User | null): Promise<ProfileData> => {
+// 1. Nepřihlášený uživatel
+if (!user) {
+return { role: 'ghost', full_name: null, status: 'pending', is_blocked: false };
+}
+
+// 2. Získání role A jména z tabulky 'profiles'
+const { data, error } = await supabase
+.from('profiles')
+// POZOR ZDE: Změna selectu, aby stahoval obě hodnoty
+.select('role, full_name, status, is_blocked, email')
+.eq('id', user.id)
+.single();
+//console.log('Fetched profile data:', data, 'Error:', error);
+if (error || !data) {
+console.error('Chyba při získávání dat profilu z databáze:', error?.message);
+// Bezpečný fallback: defaultní role a prázdné jméno
+return { role: 'user' , full_name: user.email?.split('@')[0] ?? null, status: 'pending', is_blocked: false };
+}
+
+// 3. Kontrola a vrácení dat
+const userRole = data.role as Role;
+const fullName = data.full_name;
+const status = data.status;
+const isBlocked = data.is_blocked;
+
+return {
+// Zajištění, že role je vždy 'user' nebo 'admin' (nebo fallback)
+role: (userRole === 'admin') ? 'admin' : 'user',
+full_name: fullName,
+status,
+is_blocked: isBlocked,
+};
+};
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const [session, setSession] = useState<Session | null>(null);
+const [user, setUser] = useState<User | null>(null);
+const [full_name, setFullName] = useState<string | null>(null);
+const [role, setRole] = useState<Role>('ghost');
+const [isLoading, setIsLoading] = useState(true);
+const [status, setStatus] = useState<'pending' | 'approved'>('pending');
+const [is_blocked, setIsBlocked] = useState<boolean>(false);
+
+// Funkce, která provede celou logiku načítání a aktualizace stavu
+const handleAuthStateChange = useCallback(async (currentSession: Session | null) => {
+const currentUser = currentSession?.user ?? null;
+
+    setSession(currentSession);
+    setUser(currentUser);
+
+    // Asynchronní volání pro získání role A jména
+    const profileData = await fetchUserProfileData(currentUser);
+
+    setRole(profileData.role);
+    setFullName(profileData.full_name); // <-- AKTUALIZACE JMENA
+    setStatus(profileData.status);
+    setIsBlocked(profileData.is_blocked);
+    setIsLoading(false);
+
+}, []);
+
+useEffect(() => {
+// Inicializace a posluchač (zůstává stejné)
+supabase.auth.getSession().then(({ data: { session } }) => {
+handleAuthStateChange(session);
+});
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        console.log('Auth State Changed:', event);
+        handleAuthStateChange(session);
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
+
+}, [handleAuthStateChange]);
+//console.log('AuthContext State:', { session, user, role, full_name, status, is_blocked, isLoading });
+const value: AuthState = {
+session,
+user,
+full_name, // <-- EXPORTOVÁNÍ JMENA
+role,
+status,
+is_blocked,
+isLoading,
+};
+
+// Dokud se nenačte počáteční stav (včetně role a jména), zobrazíme loading
+if (isLoading) {
+return <div className="flex items-center justify-center h-screen bg-gray-50"><p className="text-xl text-gray-500">Načítání uživatelského profilu...</p></div>;
+}
+
+return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
+// Custom Hook (zůstává stejný)
+export const useAuth = () => {
+const context = useContext(AuthContext);
+if (context === undefined) {
+throw new Error('useAuth musí být použit uvnitř AuthProvider');
+}
+return context;
+};

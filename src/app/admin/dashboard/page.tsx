@@ -25,8 +25,8 @@ const AdminDashboardPage = () => {
     }
 
     return (
-        <div className="space-y-8">
-            <h2 className="text-3xl font-bold border-b-2 pb-2 mb-6 text-gray-800">
+        <div className="space-y-8 bg-white">
+            <h2 className="max-w-7xl mx-auto text-2xl font-bold mb-3 text-gray-800 dark:text-gray-100 border-b pb-2 pt-2">
                 Správa souborů: {tabTitle}
             </h2>
             

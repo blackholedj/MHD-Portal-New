@@ -63,7 +63,7 @@ export default function Contact() {
     // ... (zbytek JSX kódu zůstává stejný)
 
     return (
-        <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+        <div className="flex min-h-screen items-center justify-center bg-white py-12 px-4 sm:px-6 lg:px-8 dark:bg-gray-900 p-4 sm:p-8">
             <div className="max-w-4xl mx-auto bg-white shadow-xl rounded-2xl overflow-hidden">
                 <div className="lg:grid lg:grid-cols-2">
                     
@@ -118,13 +118,13 @@ export default function Contact() {
                     </div>
 
                     {/* Sekce s Formulářem */}
-                    <div className="p-10">
-                        <h2 className="text-2xl font-bold text-gray-900 mb-6">
+                    <div className="p-10 dark:bg-zinc-800 dark:text-zinc-200">
+                        <h2 className="text-2xl font-bold text-gray-900 mb-6 dark:text-gray-100">
                             Rychlá Zpráva
                         </h2>
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
-                                <label htmlFor="name" className="block text-sm font-medium text-gray-700">Jméno</label>
+                                <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-200">Jméno</label>
                                 <input
                                     id="name"
                                     type="text"
@@ -137,7 +137,7 @@ export default function Contact() {
                             </div>
                             
                             <div>
-                                <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email</label>
+                                <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-200">Email</label>
                                 <input
                                     id="email"
                                     type="email"
@@ -150,7 +150,7 @@ export default function Contact() {
                             </div>
                             
                             <div>
-                                <label htmlFor="message" className="block text-sm font-medium text-gray-700">Zpráva</label>
+                                <label htmlFor="message" className="block text-sm font-medium text-gray-700 dark:text-gray-200">Zpráva</label>
                                 <textarea
                                     id="message"
                                     rows={4}

@@ -96,7 +96,7 @@ const Navigace = () => {
                     
                     <button
                         onClick={handleLogout}
-                        className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 text-sm disabled:opacity-50 flex items-center transition duration-150"
+                        className="bg-red-500 text-white px-3 py-2 rounded hover:bg-red-600 text-sm disabled:opacity-50 flex items-center transition duration-150"
                         disabled={loading}
                     >
                         {loading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <LogOut className="w-4 h-4 mr-1" />}
@@ -105,8 +105,8 @@ const Navigace = () => {
                     </button>
                 </div>
             ) : (
-                <Link href="/login" className="bg-yellow-400 text-gray-900 px-3 py-1 rounded hover:bg-yellow-500 font-medium transition duration-150" onClick={() => setIsMenuOpen(false)}>
-                    Přihlásit se
+                <Link href="/login" className="bg-yellow-400 text-gray-900 px-3 py-2 rounded hover:bg-yellow-500 font-medium transition duration-150" onClick={() => setIsMenuOpen(false)}>
+                    Přihlásit
                 </Link>
             )}
         </div>
@@ -124,7 +124,7 @@ const Navigace = () => {
                 <Link href="/" className="hover:text-blue-900 transition duration-150 flex items-center">
                     {/* ZMĚNA ZDE: Ikona BusFront je před textem a je zarovnána vodorovně */}
                     <BusFront className='w-7 h-7 mr-2 text-blue-600' />
-                    <span className='text-gray-900'>Dopravní Systém</span>
+                    <span className='text-gray-900 mr-1'>DpMost</span><span className='hidden md:flex text-gray-900'>Portál</span>
                 </Link>
             </div>
             
