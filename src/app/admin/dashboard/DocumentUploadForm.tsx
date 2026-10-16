@@ -89,7 +89,7 @@ const DocumentUploadForm = () => {
 
     setLoading(false);
   };
-
+  /* Zobrazení formuláře s Tabulkami a stylem TailwindCSS */
   return (
     <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
       <h3 className="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">Nahrát nový Dokument</h3>

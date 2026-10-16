@@ -16,7 +16,7 @@ export default function AdminLayout({
   const searchParams = useSearchParams();
   
   // Získá aktuálně vybranou záložku, defaultně 'jizdni-rady'
-  const activeTab = searchParams.get('tab') || 'jizdni-rady'; 
+  const activeTab = searchParams.get('tab') || 'users'; 
 
   useEffect(() => {
     if (!isLoading) {
@@ -41,10 +41,10 @@ export default function AdminLayout({
 
     // Definice všech záložek pro snadnější údržbu a mapování
     const adminTabs = [
+        { name: 'users', label: 'Uživatelé 👤', extraPath: 'users', color: 'red' },
+        { name: 'oznameni', label: 'Oznámení 🔔', extraPath: 'oznameni', color: 'purple' },
         { name: 'jizdni-rady', label: 'Tabulky 🚆', extraPath: 'dashboard', color: 'blue' },
         { name: 'dokumenty', label: 'Dokumenty 📃', extraPath: 'dashboard', color: 'green' },
-        { name: 'oznameni', label: 'Oznámení 🔔', extraPath: 'oznameni', color: 'purple' },
-        { name: 'users', label: 'Uživatelé 👤', extraPath: 'users', color: 'red' },
         { name: 'contact', label: 'Kontaktní zprávy 📬', extraPath: 'contact', color: 'yellow' },
     ];
     

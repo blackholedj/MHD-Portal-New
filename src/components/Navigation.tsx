@@ -64,17 +64,19 @@ const Navigace = () => {
             <Link href="/" className={getLinkClass('/', 'text-black hover:text-blue-600')}>Úvod</Link>
             <Link href="/maps" className={getLinkClass('/maps', 'text-black hover:text-blue-600')}>Mapa linek</Link>
             <Link href="/contact" className={getLinkClass('/contact', 'text-black hover:text-blue-600')}>Kontakt</Link>
+            <Link href="/jidelni-listek" className={getLinkClass('/jidelni-listek', 'text-black hover:text-blue-600')}>Jídelníček</Link>
             
             {isUserOrAdmin && (
             <>
-                <Link href="/user-portal/documents" className={getLinkClass('/user-portal/documents', 'text-black hover:text-blue-600')}>Dokumenty</Link>
                 <Link href="/user-portal/tables" className={getLinkClass('/user-portal/tables', 'text-black hover:text-blue-600')}>Tabulky</Link>
+                <Link href="/user-portal/dopravni-info" className={getLinkClass('/user-portal/dopravni-info', 'text-black hover:text-blue-600')}>Dopravní info</Link>
+                <Link href="/user-portal/documents" className={getLinkClass('/user-portal/documents', 'text-black hover:text-blue-600')}>Dokumenty</Link>
                 <Link href="/user-portal/chat" className={getLinkClass('/user-portal/chat', 'text-black hover:text-blue-600')}>Chat</Link>
             </>
             )}
             
             {isAdmin && (
-                <Link href="/admin/dashboard" className="text-red-500 hover:text-red-700 font-bold transition duration-150">ADMIN</Link>
+                <Link href="/admin/users" className="text-red-500 hover:text-red-700 font-bold transition duration-150">ADMIN</Link>
             )}
         </>
     );

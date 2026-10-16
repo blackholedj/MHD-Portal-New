@@ -1,4 +1,7 @@
 // src/app/layout.tsx
+// Tento soubor definuje hlavní layout aplikace, který se použije na všech stránkách.
+// Obsahuje navigační komponentu, kontext pro autentizaci a další globální nastavení.
+// Importy potřebných modulů a komponent, včetně kontextu pro autentizaci, globálních stylů, navigace, banneru a registrace service workeru.
 
 import { AuthProvider } from '@/context/AuthContext'; 
 import './globals.css'; 
@@ -25,7 +28,6 @@ export default function RootLayout({
       </head>
       <body>
         <AuthProvider>
-          
           {/* 2. VLOŽTE KOMPONENTU NAVIGACE PŘED DĚTI (children) */}
           {/* Navigace se zobrazí na každé stránce obalené tímto layoutem */}
           <Navigace /> 
