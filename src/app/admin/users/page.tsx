@@ -9,7 +9,7 @@ import { Check, UserX, UserCheck, X } from 'lucide-react'; // Ikony pro akce
 
 // --- TYPY DAT Z DATABÁZE ---
 interface Profile {
-    id: string; 
+    id: string;
     full_name: string | null;
     email: string | null;
     role: 'admin' | 'user';
@@ -26,9 +26,9 @@ const UserManagementPage = () => {
     const [error, setError] = useState<string | null>(null);
     const [activeFilter, setActiveFilter] = useState<UserFilter>('pending'); // Začínáme u Neschválených
     const { user } = useAuth();
-    
+
     // Zajišťujeme správné mapování stavu, pokud status neobsahuje 'blocked'
-    const formatProfiles = (data: any[]): Profile[] => {
+    const formatProfiles = (data: Profile[]): Profile[] => {
         return data.map(p => ({
             ...p,
             role: p.role as 'admin' | 'user',
@@ -40,10 +40,10 @@ const UserManagementPage = () => {
     const fetchProfiles = useCallback(async () => {
         setIsLoading(true);
         setError(null);
-        
+
         const { data: profilesData, error: fetchError } = await supabase
             .from('profiles')
-            .select('id, full_name, email, role, status, is_blocked') 
+            .select('id, full_name, email, role, status, is_blocked')
             .order('full_name', { ascending: true });
 
         if (fetchError) {
@@ -54,49 +54,135 @@ const UserManagementPage = () => {
         }
         setIsLoading(false);
     }, []);
-    
+
     // --- FUNKCE PRO AKTUALIZACI PROFILU ---
+
     const updateProfile = async (id: string, updates: Partial<Profile>) => {
-        if (!user) return; 
-        
-        // Extrahujeme pouze sloupce relevantní pro databázi
-        const dbUpdates: Partial<Omit<Profile, 'email'>> = {
-            full_name: updates.full_name,
-            role: updates.role,
-            status: updates.status,
-            is_blocked: updates.is_blocked,
-        };
+        if (!user) return;
 
-        const { error: updateError } = await supabase
-            .from('profiles')
-            .update(dbUpdates)
-            .eq('id', id);
+        setError(null);
 
-        if (updateError) {
-            setError(`Chyba při aktualizaci profilu ${id}: ${updateError.message}`);
+        // Zatím podporujeme pouze změny schválení.
+        // Role a blokování budou mít samostatné zabezpečené RPC.
+        if (
+            updates.role !== undefined ||
+            updates.is_blocked !== undefined ||
+            updates.full_name !== undefined ||
+            (updates.status !== 'approved' && updates.status !== 'pending')
+        ) {
+            setError(
+                'Tato administrátorská operace zatím není podporována.'
+            );
             return;
         }
 
-        // Aktualizujeme stav lokálně
-        setProfiles(prev => 
-            prev.map(p => {
-                if (p.id === id) {
-                    // Důležité: Upravit status, pokud se mění is_blocked
-                    let newStatus = updates.status || p.status;
-                    if (updates.is_blocked !== undefined) {
-                        newStatus = updates.is_blocked ? 'blocked' : (p.status === 'blocked' ? 'pending' : p.status);
-                    }
-                    return { ...p, ...updates, status: newStatus };
-                }
-                return p;
-            })
+        const { error: updateError } = await supabase.rpc(
+            'admin_update_user_status',
+            {
+                p_user_id: id,
+                p_new_status: updates.status,
+            }
         );
-        setError(null); 
+
+        if (updateError) {
+            setError(
+                `Chyba při aktualizaci profilu ${id}: ${updateError.message}`
+            );
+            return;
+        }
+
+        // Načteme skutečný stav z databáze.
+        await fetchProfiles();
+    };
+
+
+    const setUserBlocked = async (id: string, blocked: boolean) => {
+        if (!user) return;
+
+        setError(null);
+
+        const { error: updateError } = await supabase.rpc(
+            'admin_set_user_blocked',
+            {
+                p_user_id: id,
+                p_blocked: blocked,
+            }
+        );
+
+        if (updateError) {
+            setError(
+                `Chyba při změně blokování uživatele ${id}: ${updateError.message}`
+            );
+            return;
+        }
+
+        // Obnovíme skutečný stav profilů z databáze.
+        await fetchProfiles();
+    };
+
+
+    const setUserRole = async (
+        id: string,
+        newRole: 'admin' | 'user'
+    ) => {
+        if (!user) return;
+
+        setError(null);
+
+        const { error: updateError } = await supabase.rpc(
+            'admin_set_user_role',
+            {
+                p_user_id: id,
+                p_new_role: newRole,
+            }
+        );
+
+        if (updateError) {
+            setError(
+                `Chyba při změně role uživatele ${id}: ${updateError.message}`
+            );
+            return;
+        }
+
+        await fetchProfiles();
     };
 
     useEffect(() => {
-        fetchProfiles();
-    }, [fetchProfiles]);
+        let active = true;
+
+        // Úvodní načtení. Opakované načítání po RPC
+        // nadále zajišťuje původní fetchProfiles().
+        void Promise.resolve(
+            supabase
+                .from('profiles')
+                .select('id, full_name, email, role, status, is_blocked')
+                .order('full_name', { ascending: true })
+        )
+            .then(({ data, error: fetchError }) => {
+                if (!active) return;
+
+                if (fetchError) {
+                    console.error('Chyba při načítání profilů:', fetchError);
+                    setError('Nepodařilo se načíst uživatelské profily.');
+                } else {
+                    setError(null);
+                    setProfiles(formatProfiles(data || []));
+                }
+
+                setIsLoading(false);
+            })
+            .catch((error: unknown) => {
+                if (!active) return;
+
+                console.error('Chyba při načítání profilů:', error);
+                setError('Nepodařilo se načíst uživatelské profily.');
+                setIsLoading(false);
+            });
+
+        return () => {
+            active = false;
+        };
+    }, []);
 
 
     // --- FILTRACE PROFILŮ PODLE AKTIVNÍ ZÁLOŽKY ---
@@ -119,7 +205,7 @@ const UserManagementPage = () => {
             return false;
         });
     }, [profiles, activeFilter]);
-    
+
     // Definice záložek
     const tabs: { name: UserFilter, label: string, count: number }[] = useMemo(() => [
         { name: 'pending', label: 'Neschválení', count: profiles.filter(p => p.status === 'pending' && !p.is_blocked).length },
@@ -127,7 +213,7 @@ const UserManagementPage = () => {
         { name: 'blocked', label: 'Blokovaní', count: profiles.filter(p => p.is_blocked).length },
         { name: 'all', label: 'Všichni', count: profiles.length },
     ], [profiles]);
-    
+
 
     // --- RENDERING OVLÁDÁNÍ STAVU A CHYB ---
     if (isLoading) {
@@ -141,7 +227,7 @@ const UserManagementPage = () => {
     if (error) {
         return <div className="p-4 bg-red-100 text-red-700 rounded dark:bg-red-900 dark:text-red-300">Chyba: {error}</div>;
     }
-    
+
     const getStatusStyle = (profile: Profile) => {
         if (profile.is_blocked) return 'bg-red-500 text-white';
         if (profile.status === 'approved') return 'bg-green-100 text-green-800';
@@ -154,7 +240,7 @@ const UserManagementPage = () => {
     return (
         <div className="bg-white dark:bg-zinc-800 p-6 rounded-lg shadow-xl">
             <h2 className="text-2xl font-bold mb-6 text-gray-800 dark:text-gray-100 border-b pb-2">Správa Uživatelů 👤</h2>
-            
+
             {/* Navigace záložkami (Filtry) */}
             <nav className="mb-6 border-b border-gray-200 dark:border-zinc-700">
                 <div className="flex space-x-4 overflow-x-auto">
@@ -164,7 +250,7 @@ const UserManagementPage = () => {
                             onClick={() => setActiveFilter(tab.name)}
                             className={`
                                 py-2 px-4 text-sm font-semibold transition-colors duration-150 relative
-                                ${activeFilter === tab.name 
+                                ${activeFilter === tab.name
                                     ? 'text-blue-600 border-b-2 border-blue-600 dark:text-blue-400 dark:border-blue-400'
                                     : 'text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
                                 }
@@ -192,10 +278,10 @@ const UserManagementPage = () => {
                         </thead>
                         <tbody className="bg-white dark:bg-zinc-800 divide-y divide-gray-200 dark:divide-zinc-700">
                             {filteredProfiles.map((profile) => (
-                                <tr 
-                                    key={profile.id} 
+                                <tr
+                                    key={profile.id}
                                     className={`
-                                        transition-colors hover:bg-gray-50 dark:hover:bg-zinc-700/50 
+                                        transition-colors hover:bg-gray-50 dark:hover:bg-zinc-700/50
                                         ${profile.is_blocked ? 'opacity-70' : ''}
                                     `}
                                 >
@@ -204,13 +290,18 @@ const UserManagementPage = () => {
                                         <div className="text-sm font-medium text-gray-900 dark:text-zinc-100">{profile.full_name || 'N/A'}</div>
                                         <div className="text-sm text-gray-500 dark:text-zinc-400">{profile.email}</div>
                                     </td>
-                                    
+
                                     {/* Role (Select) */}
                                     <td className="px-6 py-4 whitespace-nowrap text-center">
                                         <select
                                             value={profile.role}
-                                            onChange={(e) => updateProfile(profile.id, { role: e.target.value as 'admin' | 'user' })}
-                                            className={`p-1 rounded border text-sm font-medium dark:bg-zinc-700 dark:border-zinc-600 
+                                            onChange={(e) =>
+                                                setUserRole(
+                                                    profile.id,
+                                                    e.target.value as 'admin' | 'user'
+                                                )
+                                            }
+                                            className={`p-1 rounded border text-sm font-medium dark:bg-zinc-700 dark:border-zinc-600
                                             ${profile.role === 'admin' ? 'bg-red-100 text-red-700 dark:text-red-300' : 'bg-green-100 text-green-700 dark:text-green-300'}`}
                                             disabled={profile.is_blocked}
                                         >
@@ -228,7 +319,7 @@ const UserManagementPage = () => {
 
                                     {/* Akce */}
                                     <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium space-x-2">
-                                        
+
                                         {/* Tlačítko pro Schválení/Neschválení */}
                                         {profile.status !== 'approved' && !profile.is_blocked && (
                                             <button
@@ -251,7 +342,7 @@ const UserManagementPage = () => {
 
                                         {/* Tlačítko pro Blokování/Odblokování */}
                                         <button
-                                            onClick={() => updateProfile(profile.id, { is_blocked: !profile.is_blocked, status: !profile.is_blocked ? 'blocked' : 'pending' })}
+                                            onClick={() => setUserBlocked(profile.id, !profile.is_blocked)}
                                             className={`p-2 rounded-full transition ${
                                                 profile.is_blocked
                                                 ? 'text-white bg-red-600 hover:bg-red-700'

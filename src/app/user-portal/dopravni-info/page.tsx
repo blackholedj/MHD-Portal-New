@@ -2,10 +2,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { uploadR2File } from '@/lib/storage/timetable-upload';
+import { getPrivateFileUrl } from '@/lib/supabase/private-storage';
 import { useAuth } from '@/context/AuthContext';
 import { GridLoader } from 'react-spinners';
 import {
-    Megaphone, Calendar, FileText, Upload, Trash2, Plus, X, ZoomIn, Info, EyeOff
+    Megaphone, Calendar, FileText, Upload, Trash2, Plus, X, ZoomIn, Info
 } from 'lucide-react';
 
 interface DopravniInfoItem {
@@ -15,6 +17,7 @@ interface DopravniInfoItem {
     valid_from: string;
     valid_to: string | null;
     images: string[];
+    signed_images?: string[];
     created_at: string;
 }
 
@@ -45,7 +48,13 @@ export default function DopravniInfoPage() {
                 .order('valid_from', { ascending: false });
 
             if (error) throw error;
-            setItems(data || []);
+            const resolved = await Promise.all((data || []).map(async item => ({
+                ...item,
+                signed_images: await Promise.all((item.images || []).map(async (path: string) => {
+                    try { return await getPrivateFileUrl('dopravni-info', path); } catch { return ''; }
+                })),
+            })));
+            setItems(resolved);
         } catch (err) {
             console.error('Chyba při načítání dopravního info:', err);
         } finally {
@@ -95,6 +104,10 @@ export default function DopravniInfoPage() {
             // 1. Nahrání všech vybraných obrázků (pokud nějaké jsou)
             for (const file of selectedFiles) {
                 const compressedBlob = await compressImage(file);
+                if (process.env.NEXT_PUBLIC_R2_ENABLED === 'true') {
+                    uploadedImageUrls.push(await uploadR2File('dopravni-info', compressedBlob, 'image/jpeg'));
+                    continue;
+                }
                 const fileExt = 'jpg';
                 const fileName = `dopravni_info/${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
 
@@ -148,7 +161,7 @@ export default function DopravniInfoPage() {
             if (deleteError) throw deleteError;
 
             // Odstranění souborů ze Storage, pokud existovaly
-            if (images.length > 0) {
+            if (process.env.NEXT_PUBLIC_R2_ENABLED !== 'true' && images.length > 0) {
                 const pathsToDelete = images.map(url => {
                     const parts = url.split(`${BUCKET_NAME}/`);
                     return parts.length > 1 ? parts[1] : '';
@@ -302,7 +315,7 @@ export default function DopravniInfoPage() {
 
                                             {/* Flex mřížka pro flexibilní zobrazení (podle počtu obrázků) */}
                                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                                {item.images.map((imgUrl, index) => (
+                                                {(item.signed_images || []).filter(Boolean).map((imgUrl, index) => (
                                                     <div
                                                         key={index}
                                                         onClick={() => setActiveLightboxUrl(imgUrl)}

@@ -12,7 +12,7 @@ import { BusFront, Loader2 , LogOut, User as UserIcon, Menu, X } from 'lucide-re
 import UserProfileModal from '@/components/common/UserProfileModal'; 
 
 const Navigace = () => {
-    const { user, role, full_name, status, is_blocked, isLoading } = useAuth(); 
+    const { user, role, full_name, status, is_blocked } = useAuth(); 
     const [loading, setLoading] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false); 
     // NOVÝ STAV: pro řízení mobilního menu

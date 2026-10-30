@@ -42,3 +42,15 @@ next-env.d.ts
 
 # Local Netlify folder
 .netlify
+
+# Local database connection credentials and private backup archives
+/pripojeni.txt
+*.dump
+*.receipt.json
+
+# Private local reviews and release backups
+/review/
+/production-backups/
+*.backup-*
+*.bak
+*.zip

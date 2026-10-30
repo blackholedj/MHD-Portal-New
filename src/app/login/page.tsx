@@ -12,15 +12,31 @@ const PrihlaseniPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const { user, isLoading: isAuthLoading } = useAuth(); 
+  const {
+    user,
+    role,
+    status,
+    is_blocked,
+    isLoading: isAuthLoading,
+  } = useAuth(); 
   const router = useRouter();
 
   // Efekt pro přesměrování již přihlášených uživatelů (Zůstává stejný)
   useEffect(() => {
-    if (!isAuthLoading && user) {
-      router.push('/user-portal/tabulky'); // Zkontrolujte cestu, pokud jste použil /tables
+    if (isAuthLoading || !user) return;
+
+    if (is_blocked || status === 'blocked') {
+      router.replace('/blocked');
+      return;
     }
-  }, [user, isAuthLoading, router]);
+
+    if (status !== 'approved' || role === 'ghost') {
+      router.replace('/pending-info');
+      return;
+    }
+
+    router.replace('/user-portal/tables');
+  }, [user, role, status, is_blocked, isAuthLoading, router]);
 
   // --- NOVÁ FUNKCE PRO PŘIHLÁŠENÍ PŘES GOOGLE ---
   const handleGoogleLogin = async () => {

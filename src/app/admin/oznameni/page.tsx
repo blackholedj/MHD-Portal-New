@@ -85,9 +85,12 @@ const AnnouncementModal: React.FC<AnnouncementModalProps> = ({ isOpen, onClose, 
             onSaveSuccess();
             onClose();
 
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Chyba při ukládání oznámení:', err);
-            setError(`Chyba: ${err.message || 'Nepodařilo se uložit oznámení.'}`);
+            const message = err instanceof Error && err.message
+                ? err.message
+                : 'Nepodařilo se uložit oznámení.';
+            setError(`Chyba: ${message}`);
         } finally {
             setIsSaving(false);
         }
@@ -286,8 +289,11 @@ const AdminAnnouncementManager: React.FC = () => {
             
             await fetchAnnouncements(); // Obnovení seznamu
             
-        } catch (err: any) {
-            setError(`Chyba při mazání: ${err.message || 'Nepodařilo se smazat.'}`);
+        } catch (err: unknown) {
+            const message = err instanceof Error && err.message
+                ? err.message
+                : 'Nepodařilo se smazat.';
+            setError(`Chyba při mazání: ${message}`);
         } finally {
             setIsLoading(false);
         }

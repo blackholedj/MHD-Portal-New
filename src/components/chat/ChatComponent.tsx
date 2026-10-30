@@ -64,8 +64,41 @@ const ChatComponent: React.FC<ChatProps> = ({ currentUserId }) => {
   };
 
   useEffect(() => {
-    fetchMessages();
-  }, [fetchMessages]);
+    let active = true;
+
+    // Úvodní načtení zpráv.
+    // Realtime nadále používá původní fetchMessages().
+    void Promise.resolve(
+      supabase
+        .from('messages')
+        .select('id, user_id, content, created_at, author_name')
+        .order('created_at', { ascending: true })
+        .limit(50)
+    )
+      .then(({ data, error }) => {
+        if (!active) return;
+
+        if (error) {
+          console.error('Chyba při načítání zpráv:', error);
+          setError('Nepodařilo se načíst zprávy.');
+        } else {
+          setMessages(data as Message[]);
+        }
+
+        setLoading(false);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+
+        console.error('Chyba při načítání zpráv:', error);
+        setError('Nepodařilo se načíst zprávy.');
+        setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
   
   // Zajištění automatického posunu při každé aktualizaci (odeslání/realtime)
   useEffect(() => {
@@ -80,7 +113,7 @@ const ChatComponent: React.FC<ChatProps> = ({ currentUserId }) => {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'messages' }, // Sledujeme INSERT/DELETE na tabulce messages
-        (payload) => {
+        () => {
           // Úspěšná operace: Automatická aktualizace zobrazení zpráv
           // Pro jednoduchost celé řešení znovu načteme, ale u velkého chatu 
           // by se optimalizovalo na pouhé přidání/odebrání jedné zprávy.

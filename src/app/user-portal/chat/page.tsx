@@ -9,7 +9,7 @@ import { GridLoader } from 'react-spinners';
 
 const ChatPage = () => {
   // Kontext pro získání informací o uživateli a načítacích stavech
-  const { user, status, role, isLoading } = useAuth(); 
+  const { user, status, isLoading } = useAuth(); 
   //console.log('ChatPage render - user:', user, 'status:', status, 'isLoading:', isLoading);
   if (isLoading) {
     return (

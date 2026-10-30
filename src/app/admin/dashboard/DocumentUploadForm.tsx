@@ -5,33 +5,34 @@
 import React, { useState, FormEvent } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
-import { v4 as uuidv4 } from 'uuid'; 
+import { v4 as uuidv4 } from 'uuid';
+import { uploadR2File } from '@/lib/storage/timetable-upload';
 
 type DocumentType = 'smernice' | 'manualy' | 'jine';
 
 const DocumentUploadForm = () => {
   const { user } = useAuth();
-  
+
   // Stavy pro formulářová pole
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [type, setType] = useState<DocumentType>('jine'); // <-- NOVÝ STAV s výchozí hodnotou
   const [adminOnly, setAdminOnly] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  
+
   // Stavy pro zpětnou vazbu
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const BUCKET_NAME = 'documents'; 
+  const BUCKET_NAME = 'documents';
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFile(e.target.files ? e.target.files[0] : null);
     setSuccess(null);
     setError(null);
   };
-  
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     // Kontrolujeme, zda je vyplněn titul a vybrán soubor (type má default)
@@ -44,50 +45,32 @@ const DocumentUploadForm = () => {
     setError(null);
     setSuccess(null);
 
-    // 1. Nahrání souboru do Supabase Storage
-    const fileExtension = file.name.split('.').pop();
-    // Vytvoříme cestu: documents/typ/uuid.pdf
-    const filePath = `${type}-${file.name}`; 
+    try {
+      const useR2 = process.env.NEXT_PUBLIC_R2_ENABLED === 'true';
+      const extension = file.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+      const contentTypes: Record<string, string> = {
+        pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+      };
+      const prefix = `${adminOnly ? 'admin' : 'shared'}/${type}`;
+      const filePath = useR2
+        ? await uploadR2File('documents', file, contentTypes[extension] ?? file.type, prefix)
+        : `${prefix}/${uuidv4()}.${extension}`;
+      if (!useR2) {
+        const { error } = await supabase.storage.from(BUCKET_NAME).upload(filePath, file, { cacheControl: '3600', upsert: false });
+        if (error) throw new Error('Nepodařilo se nahrát soubor.');
+      }
+      const { error: dbError } = await supabase.from('documents').insert({ title, description, type, file_path: filePath, admin_only: adminOnly });
+      if (dbError) {
+        if (!useR2) await supabase.storage.from(BUCKET_NAME).remove([filePath]);
+        throw new Error('Dokument se nepodařilo uložit. Obnovte seznam před dalším pokusem.');
+      }
+      setSuccess(`Dokument "${title}" byl úspěšně nahrán a publikován.`);
+      setTitle(''); setDescription(''); setType('jine'); setAdminOnly(false); setFile(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Dokument nyní nelze uložit.');
+    } finally { setLoading(false); }
 
-    const { error: uploadError } = await supabase.storage
-      .from(BUCKET_NAME)
-      .upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: false,
-      });
-
-    if (uploadError) {
-      setError(`Chyba při nahrávání souboru: ${uploadError.message}`);
-      setLoading(false);
-      return;
-    }
-    
-    // 2. Uložení metadat do databáze (tabulka: documents)
-    const { error: dbError } = await supabase
-      .from('documents')
-      .insert({
-        title,
-        description,
-        type, // <-- UKLÁDÁNÍ NOVÉHO DATUM
-        file_path: filePath,
-        admin_only: adminOnly,
-      });
-
-    if (dbError) {
-        // Soubor byl nahrán, ale metadata se nepodařilo uložit.
-        // V profesionálním prostředí by zde mělo následovat smazání souboru ze Storage.
-        setError(`Soubor byl nahrán, ale metadata se nepodařilo uložit: ${dbError.message}.`);
-    } else {
-        setSuccess(`Dokument "${title}" (Typ: ${type.toUpperCase()}) byl úspěšně nahrán a publikován.`);
-        // Vyčištění formuláře
-        setTitle('');
-        setDescription('');
-        setType('jine');
-        setAdminOnly(false);
-        setFile(null);
-    }
-
-    setLoading(false);
   };
   /* Zobrazení formuláře s Tabulkami a stylem TailwindCSS */
   return (
@@ -96,7 +79,7 @@ const DocumentUploadForm = () => {
       <form onSubmit={handleSubmit} className="space-y-6">
         {success && <div className="bg-green-100 text-green-700 p-3 rounded font-medium">{success}</div>}
         {error && <div className="bg-red-100 text-red-700 p-3 rounded font-medium">{error}</div>}
-        
+
         {/* Název Dokumentu */}
         <div>
           <label htmlFor="title" className="block text-sm font-medium text-gray-700">Název Dokumentu (Povinné)</label>
@@ -121,7 +104,7 @@ const DocumentUploadForm = () => {
             rows={2}
           />
         </div>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Typ Dokumentu (NOVÉ POLE) */}
             <div>
@@ -137,7 +120,7 @@ const DocumentUploadForm = () => {
                     <option value="jine">Jiné dokumenty</option>
                 </select>
             </div>
-            
+
             {/* Omezení přístupu (Původní pole) */}
             <div className="flex items-end pb-2">
                 <input

@@ -3,27 +3,40 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { uploadTimetableFile } from '@/lib/storage/timetable-upload';
+import {
+    getPrivateFileUrl,
+    resolvePrivateStoragePath,
+} from '@/lib/supabase/private-storage';
 import { useAuth } from '@/context/AuthContext';
 import { GridLoader } from 'react-spinners';
 import Image from 'next/image';
 import { Edit, Trash2, Loader2, Upload } from 'lucide-react';
 
 // --- TYPY DAT Z DATABÁZE ---
+// Historical storage convention: course_number contains the actual line,
+// line_number contains the actual course. Keep database keys unchanged;
+// filters, navigation and editing below use that existing convention.
 interface JizdniRad {
     id: string;
-    line_number: string;
     course_number: string;
+    line_number: string;
     transport_type: 'autobus' | 'tramvaj';
     day_type: 'pracovni' | 'vikend';
     part_of_day: 'ranni' | 'odpoledni';
-    image_url: string;
+    image_url: string | null;
+    image_path: string | null;
+    revision: number;
+    keywords?: string | null;
+    signed_url?: string | null;
     created_at: string;
 }
 
 // --- TYP PRO ZOBRAZENÍ (Seskupená data) ---
 interface GroupedTimetable {
-    line_number: string;
+    is_active: boolean;
     course_number: string;
+    line_number: string;
     transport_type: 'autobus' | 'tramvaj';
     day_type: 'pracovni' | 'vikend';
     created_at: string;
@@ -36,8 +49,8 @@ interface GroupedTimetable {
 interface Filters {
     transport_type: 'all' | 'autobus' | 'tramvaj';
     day_type: 'all' | 'pracovni' | 'vikend';
-    line_number: string;
     course_number: string;
+    line_number: string;
 }
 
 // ======================================================================
@@ -125,12 +138,12 @@ const JizdniRadFilters: React.FC<FilterProps> = ({ filters, onFilterChange, onSe
                     </select>
                 </div>
                 <div>
-                    <label htmlFor="lineNumber" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Kurzu</label>
+                    <label htmlFor="lineNumber" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Linky</label>
                     <input
                         type="text"
                         id="lineNumber"
-                        value={filters.line_number}
-                        onChange={(e) => onFilterChange({ line_number: e.target.value })}
+                        value={filters.course_number}
+                        onChange={(e) => onFilterChange({ course_number: e.target.value })}
                         onKeyDown={(e) => e.key === 'Enter' && onSearch()}
                         className="mt-1 block w-full border border-gray-300 dark:border-zinc-600 rounded-lg shadow-sm p-2 dark:bg-zinc-700 dark:text-zinc-100 placeholder:text-zinc-400 focus:border-blue-500 focus:ring-blue-500 transition"
                         placeholder="3"
@@ -138,12 +151,12 @@ const JizdniRadFilters: React.FC<FilterProps> = ({ filters, onFilterChange, onSe
                     />
                 </div>
                 <div>
-                    <label htmlFor="courseNumber" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Linky</label>
+                    <label htmlFor="courseNumber" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Kurzu</label>
                     <input
                         type="text"
                         id="courseNumber"
-                        value={filters.course_number}
-                        onChange={(e) => onFilterChange({ course_number: e.target.value })}
+                        value={filters.line_number}
+                        onChange={(e) => onFilterChange({ line_number: e.target.value })}
                         onKeyDown={(e) => e.key === 'Enter' && onSearch()}
                         className="mt-1 block w-full border border-gray-300 dark:border-zinc-600 rounded-lg shadow-sm p-2 dark:bg-zinc-700 dark:text-zinc-100 placeholder:text-zinc-400 focus:border-blue-500 focus:ring-blue-500 transition"
                         placeholder="101"
@@ -176,8 +189,8 @@ interface EditTimetableModalProps {
 const EditTimetableModal: React.FC<EditTimetableModalProps> = ({ isOpen, onClose, initialData, onSaveSuccess }) => {
 
     const [formData, setFormData] = useState({
-        line_number: '',
         course_number: '',
+        line_number: '',
         transport_type: 'autobus' as 'autobus' | 'tramvaj',
         day_type: 'pracovni' as 'pracovni' | 'vikend',
     });
@@ -190,8 +203,8 @@ const EditTimetableModal: React.FC<EditTimetableModalProps> = ({ isOpen, onClose
     useEffect(() => {
         if (initialData) {
             setFormData({
-                line_number: initialData.line_number,
                 course_number: initialData.course_number,
+                line_number: initialData.line_number,
                 transport_type: initialData.transport_type,
                 day_type: initialData.day_type,
             });
@@ -253,61 +266,23 @@ const EditTimetableModal: React.FC<EditTimetableModalProps> = ({ isOpen, onClose
         });
     };
 
-    // Funkce pro nahrání souboru a získání veřejné URL
-    const uploadFile = async (file: File, part: 'ranni' | 'odpoledni', oldRecord: JizdniRad | null) => {
-        // 1. Provedeme kompresi souboru
+    // Upload returns a private path; metadata is saved once for both parts.
+
+    const uploadFile = async (
+        file: File
+    ) => {
         const processedBlobOrFile = await compressImageIfNeeded(file);
 
-        // Pokud se jedná o obrázek, uložíme ho s příponou .jpg kvůli provedené kompresi
         const isImage = file.type.startsWith('image/');
-        const fileExt = isImage ? 'jpg' : file.name.split('.').pop();
+        if (!isImage && file.type !== 'application/pdf') {
+            throw new Error('Vyberte obrázek nebo PDF.');
+        }
+
         const contentType = isImage ? 'image/jpeg' : file.type;
 
-        const fileName = `${formData.line_number}_${formData.course_number}_${formData.day_type}_${part}.${fileExt}`;
-        const filePath = `${fileName}`;
+        const filePath = await uploadTimetableFile(processedBlobOrFile, contentType);
 
-        // 2. Nahrání zkomprimovaného souboru do Storage (přepíše stávající)
-        const { error: uploadError } = await supabase.storage
-            .from('jizdni-rady')
-            .upload(filePath, processedBlobOrFile, {
-                cacheControl: '3600',
-                upsert: true,
-                contentType: contentType
-            });
-
-        if (uploadError) {
-            throw new Error(`Chyba při nahrávání souboru ${part}: ${uploadError.message}`);
-        }
-
-        // 3. Získání veřejné URL
-        const { data: publicUrlData } = supabase.storage
-            .from('jizdni-rady')
-            .getPublicUrl(filePath);
-
-        // 4. Aktualizace/Vložení záznamu do tabulky jizdni_rady
-        const newRecordData = {
-            line_number: formData.line_number,
-            course_number: formData.course_number,
-            transport_type: formData.transport_type,
-            day_type: formData.day_type,
-            part_of_day: part,
-            image_url: publicUrlData.publicUrl,
-        };
-
-        if (oldRecord) {
-            const { error: updateError } = await supabase
-                .from('jizdni_rady')
-                .update(newRecordData)
-                .eq('id', oldRecord.id);
-
-            if (updateError) throw new Error(`Chyba při aktualizaci DB záznamu ${part}: ${updateError.message}`);
-        } else {
-            const { error: insertError } = await supabase
-                .from('jizdni_rady')
-                .insert(newRecordData);
-
-            if (insertError) throw new Error(`Chyba při vkládání DB záznamu ${part}: ${insertError.message}`);
-        }
+        return filePath;
     };
 
     const handleSave = async () => {
@@ -315,61 +290,63 @@ const EditTimetableModal: React.FC<EditTimetableModalProps> = ({ isOpen, onClose
         setStatusMessage(null);
 
         try {
-            if (!formData.line_number || !formData.course_number) {
+            const target = {
+                course_number: formData.course_number.trim(),
+                line_number: formData.line_number.trim(),
+                transport_type: formData.transport_type,
+                day_type: formData.day_type,
+            };
+            if (!target.course_number || !target.line_number) {
                 throw new Error('Číslo Linky a Kurzu nesmí být prázdné.');
             }
-
-            // --- Logika pro RANNÍ část ---
-            if (fileRanni) {
-                await uploadFile(fileRanni, 'ranni', initialData.files.ranni);
-            } else if (initialData.files.ranni && (
-                initialData.files.ranni.line_number !== formData.line_number ||
-                initialData.files.ranni.course_number !== formData.course_number ||
-                initialData.files.ranni.transport_type !== formData.transport_type ||
-                initialData.files.ranni.day_type !== formData.day_type
-            )) {
-                const { error: updateError } = await supabase
-                    .from('jizdni_rady')
-                    .update({
-                        line_number: formData.line_number,
-                        course_number: formData.course_number,
-                        transport_type: formData.transport_type,
-                        day_type: formData.day_type,
-                    })
-                    .eq('id', initialData.files.ranni.id);
-
-                if (updateError) throw new Error(`Chyba při aktualizaci RANNÍ DB metadat: ${updateError.message}`);
+            // Validate all existing parts before uploading either replacement.
+            for (const old of [initialData.files.ranni, initialData.files.odpoledni]) {
+                if (old && (!Number.isSafeInteger(old.revision) || old.revision < 0)) {
+                    throw new Error('Chybí platná revize záznamu. Obnovte seznam jízdních řádů.');
+                }
+                if (old && !old.image_path) {
+                    throw new Error('Starší jízdní řád vyžaduje převod do privátního úložiště.');
+                }
             }
-
-            // --- Logika pro ODPOLEDNÍ část ---
-            if (fileOdpoledni) {
-                await uploadFile(fileOdpoledni, 'odpoledni', initialData.files.odpoledni);
-            } else if (initialData.files.odpoledni && (
-                initialData.files.odpoledni.line_number !== formData.line_number ||
-                initialData.files.odpoledni.course_number !== formData.course_number ||
-                initialData.files.odpoledni.transport_type !== formData.transport_type ||
-                initialData.files.odpoledni.day_type !== formData.day_type
-            )) {
-                const { error: updateError } = await supabase
-                    .from('jizdni_rady')
-                    .update({
-                        line_number: formData.line_number,
-                        course_number: formData.course_number,
-                        transport_type: formData.transport_type,
-                        day_type: formData.day_type,
-                    })
-                    .eq('id', initialData.files.odpoledni.id);
-
-                if (updateError) throw new Error(`Chyba při aktualizaci ODPOLEDNÍ DB metadat: ${updateError.message}`);
+            const records = [];
+            for (const part of ['ranni', 'odpoledni'] as const) {
+                const old = initialData.files[part];
+                const file = part === 'ranni' ? fileRanni : fileOdpoledni;
+                if (!old && !file) continue;
+                const imagePath = file ? await uploadFile(file) : old!.image_path;
+                records.push({
+                    ...target,
+                    part_of_day: part,
+                    image_path: imagePath,
+                    image_url: null,
+                    keywords: old?.keywords ?? null,
+                    ...(old ? { id: old.id, expected_revision: old.revision } : {}),
+                });
             }
-
+            const { data, error: dbError } = await supabase.rpc('save_jizdni_rad_with_cleanup', {
+                p_records: records,
+            });
+            if (dbError) {
+                throw new Error((dbError.code === 'PT409' || dbError.code === '40001')
+                    ? 'Jízdní řád mezitím někdo změnil. Zavřete úpravu a obnovte seznam.'
+                    : dbError.code === '23505'
+                        ? 'Jízdní řád s těmito údaji již existuje.'
+                        : `Uložení se nepodařilo potvrdit: ${dbError.message}`);
+            }
+            if (!Array.isArray(data) || data.length !== records.length) {
+                throw new Error('Výsledek uložení se nepodařilo potvrdit. Před opakováním obnovte seznam.');
+            }
             setStatusMessage('Změny byly úspěšně uloženy a soubory zkomprimovány!');
             onSaveSuccess();
             setTimeout(onClose, 2000);
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Chyba při ukládání:', error);
-            setStatusMessage(`CHYBA: ${error.message}`);
+            const message = error instanceof Error ? error.message : 'Uložení se nepodařilo potvrdit.';
+            const recovery = message.toLowerCase().includes('obnovte seznam')
+                ? '' : ' Před dalším pokusem zavřete úpravu a obnovte seznam.';
+            const uploadNote = fileRanni || fileOdpoledni ? ' Nové soubory zůstaly zachovány.' : '';
+            setStatusMessage(`CHYBA: ${message}${recovery}${uploadNote}`);
         } finally {
             setIsSaving(false);
         }
@@ -381,28 +358,22 @@ const EditTimetableModal: React.FC<EditTimetableModalProps> = ({ isOpen, onClose
             onClick={onClose}
         >
             <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="edit-timetable-title"
                 className="bg-white dark:bg-zinc-800 p-6 sm:p-8 rounded-xl shadow-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto transform transition-all duration-300"
                 onClick={(e) => e.stopPropagation()}
             >
-                <h2 className="text-2xl font-bold mb-6 text-blue-600 dark:text-blue-300">
-                    Editovat Jízdní Řád: {initialData.line_number}/{initialData.course_number}
+                <h2 id="edit-timetable-title" className="text-2xl font-bold mb-6 text-blue-600 dark:text-blue-300">
+                    Editovat Jízdní Řád: {initialData.course_number}/{initialData.line_number}
                 </h2>
 
                 <div className="space-y-6">
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Kurzu:</label>
+                            <label htmlFor="edit-line-number" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Linky:</label>
                             <input
-                                type="text"
-                                value={formData.line_number}
-                                onChange={(e) => setFormData(prev => ({ ...prev, line_number: e.target.value.trim() }))}
-                                className="mt-1 block w-full p-2 border border-gray-300 rounded-md dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-100"
-                                disabled={isSaving}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Linky:</label>
-                            <input
+                                id="edit-line-number"
                                 type="text"
                                 value={formData.course_number}
                                 onChange={(e) => setFormData(prev => ({ ...prev, course_number: e.target.value.trim() }))}
@@ -411,8 +382,20 @@ const EditTimetableModal: React.FC<EditTimetableModalProps> = ({ isOpen, onClose
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Typ Dopravy:</label>
+                            <label htmlFor="edit-course-number" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Kurzu:</label>
+                            <input
+                                id="edit-course-number"
+                                type="text"
+                                value={formData.line_number}
+                                onChange={(e) => setFormData(prev => ({ ...prev, line_number: e.target.value.trim() }))}
+                                className="mt-1 block w-full p-2 border border-gray-300 rounded-md dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-100"
+                                disabled={isSaving}
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor="edit-transport-type" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Typ Dopravy:</label>
                             <select
+                                id="edit-transport-type"
                                 value={formData.transport_type}
                                 onChange={(e) => setFormData(prev => ({ ...prev, transport_type: e.target.value as 'autobus' | 'tramvaj' }))}
                                 className="mt-1 block w-full p-2 border border-gray-300 rounded-md dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-100"
@@ -423,8 +406,9 @@ const EditTimetableModal: React.FC<EditTimetableModalProps> = ({ isOpen, onClose
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Dny Provozu:</label>
+                            <label htmlFor="edit-day-type" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Dny Provozu:</label>
                             <select
+                                id="edit-day-type"
                                 value={formData.day_type}
                                 onChange={(e) => setFormData(prev => ({ ...prev, day_type: e.target.value as 'pracovni' | 'vikend' }))}
                                 className="mt-1 block w-full p-2 border border-gray-300 rounded-md dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-100"
@@ -439,10 +423,11 @@ const EditTimetableModal: React.FC<EditTimetableModalProps> = ({ isOpen, onClose
                     <p className="text-lg font-semibold text-gray-800 dark:text-zinc-50 border-t pt-4 mt-4">Nahrát nové soubory (automatická komprese)</p>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300 flex items-center mb-1">
+                            <label htmlFor="edit-ranni-file" className="block text-sm font-medium text-gray-700 dark:text-zinc-300 flex items-center mb-1">
                                 <Upload size={16} className="mr-1" /> Ranní JŘ ({initialData.files.ranni ? 'Nahrazeno' : 'Vytvořeno'}):
                             </label>
                             <input
+                                id="edit-ranni-file"
                                 type="file"
                                 accept="image/png, image/jpeg, image/webp"
                                 onChange={(e) => setFileRanni(e.target.files ? e.target.files[0] : null)}
@@ -458,10 +443,11 @@ const EditTimetableModal: React.FC<EditTimetableModalProps> = ({ isOpen, onClose
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300 flex items-center mb-1">
+                            <label htmlFor="edit-odpoledni-file" className="block text-sm font-medium text-gray-700 dark:text-zinc-300 flex items-center mb-1">
                                 <Upload size={16} className="mr-1" /> Odpolední JŘ ({initialData.files.odpoledni ? 'Nahrazeno' : 'Vytvořeno'}):
                             </label>
                             <input
+                                id="edit-odpoledni-file"
                                 type="file"
                                 accept="image/png, image/jpeg, image/webp"
                                 onChange={(e) => setFileOdpoledni(e.target.files ? e.target.files[0] : null)}
@@ -496,8 +482,8 @@ const EditTimetableModal: React.FC<EditTimetableModalProps> = ({ isOpen, onClose
                         onClick={handleSave}
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center"
                         disabled={isSaving || (!fileRanni && !fileOdpoledni &&
-                            formData.line_number === initialData.line_number &&
                             formData.course_number === initialData.course_number &&
+                            formData.line_number === initialData.line_number &&
                             formData.transport_type === initialData.transport_type &&
                             formData.day_type === initialData.day_type
                         )}
@@ -521,7 +507,16 @@ const JizdniRadyPage = () => {
     const { user, isLoading: isAuthLoading, status, role } = useAuth();
     const isAdmin = role === 'admin';
 
+    const [visibilityReady, setVisibilityReady] = useState(false);
+    const [visibilityBusy, setVisibilityBusy] = useState(false);
+    const [visibilityMessage, setVisibilityMessage] = useState<string | null>(null);
     const [jizdniRady, setJizdniRady] = useState<GroupedTimetable[]>([]);
+    const [selectedType, setSelectedType] = useState<string | null>(null);
+    const [selectedLine, setSelectedLine] = useState<string | null>(null);
+    const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
+    const [detail, setDetail] = useState<GroupedTimetable | null>(null);
+    const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+    const [detailAttempt, setDetailAttempt] = useState(0);
     const [isLoadingData, setIsLoadingData] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -533,8 +528,8 @@ const JizdniRadyPage = () => {
     const initialFilters: Filters = {
         transport_type: 'all',
         day_type: 'all',
-        line_number: '',
         course_number: '',
+        line_number: '',
     };
 
     const [draftFilters, setDraftFilters] = useState<Filters>(initialFilters);
@@ -547,8 +542,8 @@ const JizdniRadyPage = () => {
         let query = supabase
             .from('jizdni_rady')
             .select('*')
-            .order('line_number', { ascending: true })
-            .order('course_number', { ascending: true });
+            .order('course_number', { ascending: true })
+            .order('line_number', { ascending: true });
 
         if (appliedFilters.transport_type !== 'all') {
             query = query.eq('transport_type', appliedFilters.transport_type);
@@ -556,11 +551,11 @@ const JizdniRadyPage = () => {
         if (appliedFilters.day_type !== 'all') {
             query = query.eq('day_type', appliedFilters.day_type);
         }
-        if (appliedFilters.line_number) {
-            query = query.ilike('line_number', `%${appliedFilters.line_number}%`);
-        }
         if (appliedFilters.course_number) {
             query = query.ilike('course_number', `%${appliedFilters.course_number}%`);
+        }
+        if (appliedFilters.line_number) {
+            query = query.ilike('line_number', `%${appliedFilters.line_number}%`);
         }
 
         const { data, error: fetchError } = await query;
@@ -568,13 +563,41 @@ const JizdniRadyPage = () => {
         if (fetchError) {
             setError('Nepodařilo se načíst jízdní řády. Zkontrolujte RLS politiky.');
             setJizdniRady([]);
+
         } else {
-            const groupedData = (data as JizdniRad[]).reduce((acc, current) => {
-                const key = `${current.line_number}-${current.course_number}-${current.day_type}`;
+            const records = (data ?? []) as JizdniRad[];
+            const visibility = new Map<string, boolean>();
+            if (isAdmin) {
+                // Fetch every visibility setting, including courses beyond one API page.
+                for (let offset = 0; ; offset += 500) {
+                    const result = await supabase.from('timetable_course_visibility')
+                        .select('transport_type,course_number,line_number,day_type,is_active')
+                        .order('transport_type').order('course_number').order('line_number').order('day_type')
+                        .range(offset, offset + 499);
+                    if (result.error) {
+                        visibility.clear();
+                        setVisibilityReady(false);
+                        break;
+                    }
+                    for (const row of result.data ?? []) {
+                        visibility.set(JSON.stringify([row.transport_type, row.course_number, row.line_number, row.day_type]), row.is_active);
+                    }
+                    if ((result.data?.length ?? 0) < 500) {
+                        setVisibilityReady(true);
+                        break;
+                    }
+                }
+            }
+
+
+            const groupedData = records.reduce((acc, current) => {
+
+                const key = JSON.stringify([current.transport_type, current.course_number, current.line_number, current.day_type]);
                 if (!acc[key]) {
                     acc[key] = {
-                        line_number: current.line_number,
+                        is_active: visibility.get(key) ?? true,
                         course_number: current.course_number,
+                        line_number: current.line_number,
                         transport_type: current.transport_type,
                         day_type: current.day_type,
                         created_at: current.created_at,
@@ -590,18 +613,89 @@ const JizdniRadyPage = () => {
             }, {} as Record<string, GroupedTimetable>);
 
             const finalDisplayData = Object.values(groupedData).sort((a, b) =>
-                a.line_number.localeCompare(b.line_number) || a.course_number.localeCompare(b.course_number)
+                a.course_number.localeCompare(b.course_number) || a.line_number.localeCompare(b.line_number)
             );
             setJizdniRady(finalDisplayData);
         }
         setIsLoadingData(false);
-    }, [appliedFilters]);
+    }, [appliedFilters, isAdmin]);
 
     useEffect(() => {
         if (!isAuthLoading && user) {
             fetchJizdniRady();
         }
     }, [isAuthLoading, user, fetchJizdniRady]);
+
+    // Metadata navigation never signs or renders files. Only the open course does.
+    const typeKey = (row: GroupedTimetable) => `${row.transport_type}:${row.day_type}`;
+    const typeLabel = (row: GroupedTimetable) =>
+        `${row.transport_type === 'autobus' ? 'Autobus' : 'Tramvaj'} · ${row.day_type === 'pracovni' ? 'Pracovní dny' : 'Víkend'}`;
+    const course = jizdniRady.find(row => typeKey(row) === selectedType &&
+        row.course_number === selectedLine && row.line_number === selectedCourse);
+    const currentDetail = detail && typeKey(detail) === selectedType && detail.course_number === selectedLine && detail.line_number === selectedCourse ? detail : null;
+    const types = Array.from(new Map(jizdniRady.map(row => [typeKey(row), row])).values());
+    const typeRows = jizdniRady.filter(row => typeKey(row) === selectedType);
+    const lines = Array.from(new Set(typeRows.map(row => row.course_number)))
+        .sort((a, b) => a.localeCompare(b, 'cs', { numeric: true }));
+    const courses = typeRows.filter(row => row.course_number === selectedLine)
+        .sort((a, b) => a.line_number.localeCompare(b.line_number, 'cs', { numeric: true }));
+
+    useEffect(() => {
+        let cancelled = false;
+        setDetail(null);
+        if (!course || isLoadingData || !user || status !== 'approved') {
+            setIsLoadingDetail(false);
+            return;
+        }
+        setIsLoadingDetail(true);
+        const sign = async (record: JizdniRad | null): Promise<JizdniRad | null> => {
+            if (!record) return null;
+            const path = resolvePrivateStoragePath(record.image_path || record.image_url || '', 'jizdni-rady');
+            try {
+                return { ...record, signed_url: path ? await getPrivateFileUrl('jizdni-rady', path, 3600) : null };
+            } catch {
+                return { ...record, signed_url: null };
+            }
+        };
+        void Promise.all([sign(course.files.ranni), sign(course.files.odpoledni)])
+            .then(([ranni, odpoledni]) => {
+                if (!cancelled) {
+                    setDetail({ ...course, files: { ranni, odpoledni } });
+                    setIsLoadingDetail(false);
+                }
+            });
+        return () => { cancelled = true; };
+    }, [course, isLoadingData, user, status, detailAttempt]);
+
+    const toggleCourseVisibility = async (row: GroupedTimetable) => {
+        if (!isAdmin || !visibilityReady || visibilityBusy) return;
+        setVisibilityBusy(true);
+        setVisibilityMessage(null);
+        try {
+            const { error: updateError } = await supabase.rpc('set_timetable_course_visibility', {
+                p_line_number: row.line_number,
+                p_course_number: row.course_number,
+                p_transport_type: row.transport_type,
+                p_day_type: row.day_type,
+                p_is_active: !row.is_active,
+                p_expected_active: row.is_active,
+            });
+            if (updateError) {
+                setVisibilityMessage(updateError.code === '40001'
+                    ? 'Kurz mezitím někdo změnil. Seznam byl obnoven; zkontrolujte jeho stav.'
+                    : 'Viditelnost se nepodařilo změnit. Zkuste to znovu.');
+            } else {
+                setVisibilityMessage(row.is_active
+                    ? 'Celý kurz je vypnutý pro uživatele. Ranní i odpolední tabulka zůstávají uložené.'
+                    : 'Celý kurz je znovu viditelný pro uživatele.');
+            }
+            await fetchJizdniRady();
+        } catch {
+            setVisibilityMessage('Viditelnost se nepodařilo změnit. Zkuste to znovu.');
+        } finally {
+            setVisibilityBusy(false);
+        }
+    };
 
     const openEditModal = useCallback((data: GroupedTimetable) => {
         setEditData(data);
@@ -625,8 +719,12 @@ const JizdniRadyPage = () => {
         setModalAltText('');
     }, []);
 
+
+
     const handleDelete = useCallback(async (jizdniRad: GroupedTimetable) => {
-        if (!window.confirm(`Opravdu chcete smazat jízdní řád ${jizdniRad.line_number}/${jizdniRad.course_number} (${jizdniRad.day_type})? Tato akce smaže záznamy z DB i soubory ze Storage.`)) {
+        if (!window.confirm(
+            `Opravdu chcete smazat jízdní řád ${jizdniRad.course_number}/${jizdniRad.line_number} (${jizdniRad.day_type})?`
+        )) {
             return;
         }
 
@@ -634,45 +732,115 @@ const JizdniRadyPage = () => {
         setError(null);
 
         try {
-            const filesToDelete: { id: string, image_url: string }[] = [];
+            const filesToDelete = [
+                jizdniRad.files.ranni,
+                jizdniRad.files.odpoledni,
+            ].filter((file): file is JizdniRad => file != null);
 
-            if (jizdniRad.files.ranni) {
-                filesToDelete.push({ id: jizdniRad.files.ranni.id, image_url: jizdniRad.files.ranni.image_url });
-            }
-            if (jizdniRad.files.odpoledni) {
-                filesToDelete.push({ id: jizdniRad.files.odpoledni.id, image_url: jizdniRad.files.odpoledni.image_url });
+            if (filesToDelete.length === 0) {
+                throw new Error('Nebyly nalezeny žádné záznamy k odstranění.');
             }
 
-            for (const file of filesToDelete) {
-                const urlParts = file.image_url.split('/storage/v1/object/public/jizdni-rady/');
-                if (urlParts.length === 2) {
-                    const filePath = urlParts[1];
-                    const { error: storageError } = await supabase.storage
-                        .from('jizdni-rady')
-                        .remove([filePath]);
-                    if (storageError) console.error(`Chyba při mazání souboru ${filePath}:`, storageError.message);
+            const idsToDelete = [...new Set(filesToDelete.map(file => file.id))];
+
+            if (idsToDelete.length !== filesToDelete.length) {
+                throw new Error('Byly nalezeny duplicitní identifikátory záznamů.');
+            }
+
+            // Ověření aktuálního stavu databáze.
+            const { data: currentRows, error: readError } = await supabase
+                .from('jizdni_rady')
+                .select('id, image_path, image_url')
+                .in('id', idsToDelete);
+
+            if (readError) {
+                throw new Error(`Nelze ověřit záznamy: ${readError.message}`);
+            }
+
+            if (!currentRows || currentRows.length !== idsToDelete.length) {
+                throw new Error(
+                    'Počet záznamů v databázi neodpovídá očekávání. Mazání bylo zastaveno.'
+                );
+            }
+
+            currentRows.forEach(row => {
+                const original = filesToDelete.find(
+                    file => String(file.id) === String(row.id)
+                );
+
+                if (!original ||
+                    original.image_path !== row.image_path ||
+                    original.image_url !== row.image_url) {
+                    throw new Error(
+                        `Záznam ${row.id} byl mezitím změněn. Obnovte stránku.`
+                    );
                 }
+
+                const path = resolvePrivateStoragePath(
+                    row.image_path || row.image_url || '',
+                    'jizdni-rady'
+                );
+
+                if (!path) {
+                    throw new Error(
+                        `Nelze určit cestu souboru záznamu ${row.id}.`
+                    );
+                }
+
+                // Rezervace cesty pro budoucí fyzické smazání.
+            });
+
+            // Atomické databázové mazání přes zabezpečenou RPC.
+            // RPC současně rezervuje původní cesty v cleanup frontě.
+            // Fyzické mazání Storage provede až budoucí serverový worker.
+
+            const expectedRecords = filesToDelete.map(file => ({
+                id: file.id,
+                image_path: file.image_path ?? null,
+                image_url: file.image_url ?? null,
+            }));
+
+            const { data: deletedCount, error: dbError } = await supabase.rpc(
+                'delete_jizdni_rady_with_cleanup',
+                {
+                    p_expected: expectedRecords,
+                }
+            );
+
+            if (dbError) {
+                throw new Error(
+                    (dbError.code === 'PT409' || dbError.code === '40001')
+                        ? 'Jízdní řád mezitím někdo změnil. Obnovte seznam před dalším mazáním.'
+                        : `Mazání jízdního řádu selhalo: ${dbError.message}`
+                );
             }
 
-            const idsToDelete = filesToDelete.map(f => f.id);
-            if (idsToDelete.length > 0) {
-                const { error: dbError } = await supabase
-                    .from('jizdni_rady')
-                    .delete()
-                    .in('id', idsToDelete);
-
-                if (dbError) throw new Error(`Chyba při mazání záznamů v DB: ${dbError.message}`);
+            if (
+                typeof deletedCount !== 'number' ||
+                deletedCount !== idsToDelete.length
+            ) {
+                throw new Error(
+                    'Databáze nepotvrdila očekávaný počet odstraněných záznamů. ' +
+                    'Je nutná kontrola konzistence dat.'
+                );
             }
 
-            alert('Jízdní řád byl úspěšně smazán!');
             await fetchJizdniRady();
+            alert('Jízdní řád byl úspěšně smazán!');
 
-        } catch (e: any) {
-            setError(`Chyba při mazání: ${e.message}`);
+        } catch (error) {
+            const message = error instanceof Error
+                ? error.message
+                : 'Neznámá chyba';
+
+            console.error('Chyba při mazání jízdního řádu:', error);
+            setError(`Chyba při mazání: ${message}`);
+        } finally {
             setIsLoadingData(false);
         }
-
     }, [fetchJizdniRady]);
+
+
 
     if (isAuthLoading || isLoadingData) {
         return (
@@ -707,19 +875,42 @@ const JizdniRadyPage = () => {
                 <JizdniRadFilters
                     filters={draftFilters}
                     onFilterChange={(newFilters: Partial<Filters>) => setDraftFilters(prev => ({ ...prev, ...newFilters }))}
-                    onSearch={() => setAppliedFilters(draftFilters)}
+                    onSearch={() => {
+                        setSelectedType(null);
+                        setSelectedLine(null);
+                        setSelectedCourse(null);
+                        setAppliedFilters({ ...draftFilters });
+                    }}
                     isLoading={isLoadingData}
                 />
+
+                {isAdmin && !visibilityReady && <p role="status" className="mb-4 text-amber-700 dark:text-amber-300">Ovládání viditelnosti kurzů zatím není dostupné.</p>}
+                {isAdmin && visibilityMessage && <p role="status" className="mb-4">{visibilityMessage}</p>}
+                <nav aria-label="Výběr jízdního řádu" className="flex flex-wrap gap-3 mb-6 text-blue-700 dark:text-blue-300">
+                    <button onClick={() => { setSelectedType(null); setSelectedLine(null); setSelectedCourse(null); }}>Typy kurzů</button>
+                    {selectedType && <><span>›</span><button onClick={() => { setSelectedLine(null); setSelectedCourse(null); }}>{types.find(row => typeKey(row) === selectedType) ? typeLabel(types.find(row => typeKey(row) === selectedType)!) : 'Typ kurzu'}</button></>}
+                    {selectedLine && <><span>›</span><button onClick={() => setSelectedCourse(null)}>Linka {selectedLine}</button></>}
+                    {selectedCourse && <><span>›</span><span aria-current="page">Kurz {selectedCourse}</span></>}
+                </nav>
+                {!selectedCourse && jizdniRady.length > 0 && <h2 className="text-xl font-semibold mb-4">{!selectedType ? 'Vyberte typ kurzu' : !selectedLine ? 'Vyberte linku' : 'Vyberte kurz'}</h2>}
+                {!selectedCourse && jizdniRady.length > 0 && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                    {!selectedType ? types.map(row => <button key={typeKey(row)} className="p-6 rounded-xl bg-white dark:bg-zinc-800 shadow text-left" onClick={() => setSelectedType(typeKey(row))}>{typeLabel(row)}</button>) :
+                        !selectedLine ? lines.map(line => <button key={line} className="p-6 rounded-xl bg-white dark:bg-zinc-800 shadow text-left" onClick={() => setSelectedLine(line)}>Linka {line}</button>) :
+                        courses.map(row => <button key={row.line_number} className="p-6 rounded-xl bg-white dark:bg-zinc-800 shadow text-left" onClick={() => setSelectedCourse(row.line_number)}>Kurz {row.line_number}{isAdmin && visibilityReady && <span className="block mt-2 text-sm">{row.is_active ? 'Aktivní' : 'Neaktivní · pouze pro administrátora'}</span>}</button>)}
+                </div>}
+                {selectedCourse && isLoadingDetail && <p role="status" className="mb-6">Načítání obrázků kurzu…</p>}
+                {selectedCourse && !isLoadingDetail && !course && <p>Vybraný kurz již není dostupný. Vyberte jiný kurz.</p>}
+                {selectedCourse && currentDetail && <button className="mb-4 text-blue-700 dark:text-blue-300" onClick={() => { setDetail(null); setDetailAttempt(value => value + 1); }}>Obnovit obrázky</button>}
 
                 {jizdniRady.length === 0 ? (
                     <div className="bg-white dark:bg-zinc-800 p-6 rounded-xl shadow-lg text-center text-gray-600 dark:text-zinc-400">
                         Nebyly nalezeny žádné jízdní řády odpovídající vašim kritériím.
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        {jizdniRady.map((jizdniRad) => (
+                    <div className="grid grid-cols-1 gap-6">
+                        {(selectedCourse && !isLoadingDetail && currentDetail ? [currentDetail] : []).map((jizdniRad) => (
                             <div
-                                key={`${jizdniRad.line_number}-${jizdniRad.course_number}-${jizdniRad.day_type}`}
+                                key={`${jizdniRad.transport_type}-${jizdniRad.course_number}-${jizdniRad.line_number}-${jizdniRad.day_type}`}
                                 className="bg-white dark:bg-zinc-800 rounded-xl shadow-lg border border-gray-200 dark:border-zinc-700 overflow-hidden hover:shadow-2xl transition-shadow duration-300 flex flex-col relative"
                             >
 
@@ -743,7 +934,19 @@ const JizdniRadyPage = () => {
                                 )}
 
                                 <div className="p-4 bg-blue-50 dark:bg-blue-900/50 border-b border-gray-200 dark:border-zinc-700">
-                                    <h3 className="text-2xl font-extrabold mb-1 text-blue-700 dark:text-blue-300">{jizdniRad.line_number}/{jizdniRad.course_number}</h3>
+                                    {isAdmin && <div className="mb-3 pr-20">
+                                        <button
+                                            type="button"
+                                            role="switch"
+                                            aria-label="Viditelnost celého kurzu pro uživatele"
+                                            aria-checked={visibilityReady && jizdniRad.is_active}
+                                            disabled={!visibilityReady || visibilityBusy}
+                                            onClick={() => void toggleCourseVisibility(jizdniRad)}
+                                            className="rounded-lg px-3 py-2 bg-white dark:bg-zinc-800 border border-blue-300 dark:border-blue-600 disabled:opacity-50"
+                                        >{!visibilityReady ? 'Viditelnost není dostupná' : visibilityBusy ? 'Ukládání…' : jizdniRad.is_active ? 'Aktivní · Vypnout celý kurz' : 'Neaktivní · Zapnout celý kurz'}</button>
+                                        <p className="text-sm mt-2">Platí společně pro ranní i odpolední tabulku.</p>
+                                    </div>}
+                                    <h3 className="text-2xl font-extrabold mb-1 text-blue-700 dark:text-blue-300">{jizdniRad.course_number}/{jizdniRad.line_number}</h3>
                                     <p className="text-gray-600 dark:text-zinc-400 text-sm">
                                         <span className="font-semibold">Dny:</span> {jizdniRad.day_type === 'pracovni' ? 'Pracovní dny' : 'Víkend'}
                                     </p>
@@ -756,52 +959,80 @@ const JizdniRadyPage = () => {
                                     <div className="flex flex-col sm:flex-row gap-4">
                                         <div className="flex-1 min-w-0">
                                             <h4 className="font-bold text-lg text-gray-800 dark:text-zinc-50 mb-2 text-center">Ranní</h4>
-                                            {jizdniRad.files.ranni ? (
+
+                                            {jizdniRad.files.ranni?.signed_url ? (
                                                 <div
-                                                    onClick={() => openModal(jizdniRad.files.ranni!.image_url, `JŘ Ranní ${jizdniRad.line_number}/${jizdniRad.course_number}`)}
+                                                    onClick={() => {
+                                                        const url = jizdniRad.files.ranni?.signed_url;
+
+                                                        if (url) {
+                                                            openModal(
+                                                                url,
+                                                                `JŘ Ranní ${jizdniRad.course_number}/${jizdniRad.line_number}`
+                                                            );
+                                                        }
+                                                    }}
                                                     className="block border border-gray-300 dark:border-zinc-700 rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-shadow cursor-pointer"
                                                 >
                                                     <div className="relative w-full aspect-[4/3] bg-gray-200 dark:bg-zinc-700">
                                                         <Image
-                                                            src={jizdniRad.files.ranni.image_url}
-                                                            alt={`Náhled Ranní JŘ Linka ${jizdniRad.line_number}`}
-                                                            layout="fill"
-                                                            objectFit="contain"
-                                                            className="rounded-lg" loading="lazy"
+                                                            src={jizdniRad.files.ranni.signed_url}
+                                                            alt={`Náhled Ranní JŘ Linka ${jizdniRad.course_number}`}
+                                                            fill
+                                                            sizes="(max-width: 640px) 100vw, 50vw"
+                                                            className="rounded-lg object-contain"
+                                                            loading="lazy"
                                                             unoptimized
                                                         />
                                                     </div>
                                                 </div>
                                             ) : (
-                                                <div className="w-full aspect-[4/3] bg-gray-100 dark:bg-zinc-700 flex items-center justify-center text-gray-500 dark:text-zinc-400 rounded-lg border border-dashed border-gray-300 dark:border-zinc-600">
-                                                    Není nahráno
+                                                <div className="w-full aspect-[4/3] bg-gray-100 dark:bg-zinc-700 flex items-center justify-center text-gray-500 dark:text-zinc-400 rounded-lg border border-dashed border-gray-300 dark:border-zinc-600 text-center p-4">
+                                                    {jizdniRad.files.ranni
+                                                        ? 'Fotografii se nepodařilo načíst'
+                                                        : 'Není nahráno'}
                                                 </div>
                                             )}
+
                                         </div>
 
                                         <div className="flex-1 min-w-0">
                                             <h4 className="font-bold text-lg text-gray-800 dark:text-zinc-50 mb-2 text-center mt-4 sm:mt-0">Odpolední</h4>
-                                            {jizdniRad.files.odpoledni ? (
+
+                                            {jizdniRad.files.odpoledni?.signed_url ? (
                                                 <div
-                                                    onClick={() => openModal(jizdniRad.files.odpoledni!.image_url, `JŘ Odpolední ${jizdniRad.line_number}/${jizdniRad.course_number}`)}
+                                                    onClick={() => {
+                                                        const url = jizdniRad.files.odpoledni?.signed_url;
+
+                                                        if (url) {
+                                                            openModal(
+                                                                url,
+                                                                `JŘ Odpolední ${jizdniRad.course_number}/${jizdniRad.line_number}`
+                                                            );
+                                                        }
+                                                    }}
                                                     className="block border border-gray-300 dark:border-zinc-700 rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-shadow cursor-pointer"
                                                 >
                                                     <div className="relative w-full aspect-[4/3] bg-gray-200 dark:bg-zinc-700">
                                                         <Image
-                                                            src={jizdniRad.files.odpoledni.image_url}
-                                                            alt={`Náhled Odpolední JŘ Linka ${jizdniRad.line_number}`}
-                                                            layout="fill"
-                                                            objectFit="contain"
-                                                            className="rounded-lg" loading="lazy"
+                                                            src={jizdniRad.files.odpoledni.signed_url}
+                                                            alt={`Náhled Odpolední JŘ Linka ${jizdniRad.course_number}`}
+                                                            fill
+                                                            sizes="(max-width: 640px) 100vw, 50vw"
+                                                            className="rounded-lg object-contain"
+                                                            loading="lazy"
                                                             unoptimized
                                                         />
                                                     </div>
                                                 </div>
                                             ) : (
-                                                <div className="w-full aspect-[4/3] bg-gray-100 dark:bg-zinc-700 flex items-center justify-center text-gray-500 dark:text-zinc-400 rounded-lg border border-dashed border-gray-300 dark:border-zinc-600">
-                                                    Není nahráno
+                                                <div className="w-full aspect-[4/3] bg-gray-100 dark:bg-zinc-700 flex items-center justify-center text-gray-500 dark:text-zinc-400 rounded-lg border border-dashed border-gray-300 dark:border-zinc-600 text-center p-4">
+                                                    {jizdniRad.files.odpoledni
+                                                        ? 'Fotografii se nepodařilo načíst'
+                                                        : 'Není nahráno'}
                                                 </div>
                                             )}
+
                                         </div>
                                     </div>
                                 </div>

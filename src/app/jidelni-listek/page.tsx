@@ -1,13 +1,27 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { uploadR2File } from '@/lib/storage/timetable-upload';
+import { getPrivateFileUrl } from '@/lib/supabase/private-storage';
 import { useAuth } from '@/context/AuthContext';
 import { GridLoader } from 'react-spinners';
 import { Utensils, Upload, Eye, EyeOff, RefreshCw, CalendarDays, CalendarClock, X, ZoomIn } from 'lucide-react';
 
 export default function JidelniListekPage() {
-    const { isLoading: isAuthLoading, role } = useAuth();
+    const {
+        user,
+        role,
+        status,
+        is_blocked,
+        isLoading: isAuthLoading,
+    } = useAuth();
+
+    const canReadMenu =
+        !!user &&
+        status === 'approved' &&
+        is_blocked === false &&
+        (role === 'user' || role === 'admin');
     const isAdmin = role === 'admin';
 
     // Stavy pro AKTUÁLNÍ týden
@@ -29,47 +43,172 @@ export default function JidelniListekPage() {
     const BUCKET_NAME = 'jidelni-listek';
     const FILE_CURRENT = 'aktualni_menu.jpg';
     const FILE_NEXT = 'nasledujici_menu.jpg';
+    const [menuPaths, setMenuPaths] = useState<Record<string, string | null>>({});
 
     // Načtení stavů a URL adres
-    const fetchData = async () => {
+    // Identita a oprávnění aktuálně aktivního uživatele.
+    const accessKey = `${user?.id ?? 'anonymous'}:${canReadMenu}:${isAdmin}`;
+
+    const accessRef = useRef(accessKey);
+    const requestGeneration = useRef(0);
+
+    // Zneplatnění proběhne před vykreslením nové obrazovky.
+    useLayoutEffect(() => {
+        accessRef.current = accessKey;
+        requestGeneration.current += 1;
+
+        return () => {
+            requestGeneration.current += 1;
+        };
+    }, [accessKey]);
+
+    const fetchData = useCallback(async () => {
+        if (!canReadMenu || isAuthLoading ||
+            accessRef.current !== accessKey) {
+            return;
+        }
+
+        const generation = ++requestGeneration.current;
+
+        const isCurrent = () =>
+            requestGeneration.current === generation &&
+            accessRef.current === accessKey;
+
         setIsLoadingData(true);
         setError(null);
+
         try {
-            const { data: configData, error: configError } = await supabase
-                .from('app_config')
-                .select('id, is_visible')
-                .in('id', ['jidelni_listek', 'jidelni_listek_priprava']);
+            const { data: configData, error: configError } =
+                await supabase
+                    .from('app_config')
+                    .select(
+                        process.env.NEXT_PUBLIC_R2_ENABLED === 'true'
+                            ? 'id, is_visible, file_path'
+                            : 'id, is_visible'
+                    )
+                    .in('id', [
+                        'jidelni_listek',
+                        'jidelni_listek_priprava',
+                    ]);
 
-            if (!configError && configData) {
-                configData.forEach(item => {
-                    if (item.id === 'jidelni_listek') setIsVisibleCurrent(item.is_visible);
-                    if (item.id === 'jidelni_listek_priprava') setIsVisibleNext(item.is_visible);
-                });
+            if (!isCurrent()) return;
+            if (configError) throw configError;
+
+            const configs = (configData ?? []) as unknown as {
+                id: string;
+                is_visible: boolean;
+                file_path?: string | null;
+            }[];
+
+            const current = configs.find(
+                item => item.id === 'jidelni_listek'
+            );
+
+            const next = configs.find(
+                item => item.id === 'jidelni_listek_priprava'
+            );
+
+            let currentUrl: string | null = null;
+            let nextUrl: string | null = null;
+
+            if (process.env.NEXT_PUBLIC_R2_ENABLED === 'true') {
+                const resolve = async (
+                    config: typeof current,
+                    legacy: string
+                ): Promise<string | null> => {
+                    if (!config ||
+                        (!isAdmin && !config.is_visible)) {
+                        return null;
+                    }
+
+                    return getPrivateFileUrl(
+                        'jidelni-listek',
+                        config.file_path || legacy
+                    ).catch(() => null);
+                };
+
+                currentUrl = await resolve(
+                    current,
+                    FILE_CURRENT
+                );
+
+                if (!isCurrent()) return;
+
+                nextUrl = await resolve(
+                    next,
+                    FILE_NEXT
+                );
+
+                if (!isCurrent()) return;
+            } else {
+                const timestamp = Date.now();
+
+                const currentPublic = supabase.storage
+                    .from(BUCKET_NAME)
+                    .getPublicUrl(FILE_CURRENT);
+
+                const nextPublic = supabase.storage
+                    .from(BUCKET_NAME)
+                    .getPublicUrl(FILE_NEXT);
+
+                currentUrl = currentPublic.data?.publicUrl
+                    ? `${currentPublic.data.publicUrl}?t=${timestamp}`
+                    : null;
+
+                nextUrl = nextPublic.data?.publicUrl
+                    ? `${nextPublic.data.publicUrl}?t=${timestamp}`
+                    : null;
             }
 
-            const timestamp = new Date().getTime();
+            if (!isCurrent()) return;
 
-            const { data: urlCurrent } = supabase.storage.from(BUCKET_NAME).getPublicUrl(FILE_CURRENT);
-            if (urlCurrent?.publicUrl) {
-                setCurrentImageUrl(`${urlCurrent.publicUrl}?t=${timestamp}`);
-            }
+            // Data aplikujeme až po dokončení všech požadavků.
+            setIsVisibleCurrent(current?.is_visible ?? false);
+            setIsVisibleNext(next?.is_visible ?? false);
 
-            const { data: urlNext } = supabase.storage.from(BUCKET_NAME).getPublicUrl(FILE_NEXT);
-            if (urlNext?.publicUrl) {
-                setNextImageUrl(`${urlNext.publicUrl}?t=${timestamp}`);
-            }
+            setMenuPaths(
+                Object.fromEntries(
+                    configs.map(item => [
+                        item.id,
+                        item.file_path ?? null,
+                    ])
+                )
+            );
+
+            setCurrentImageUrl(currentUrl);
+            setNextImageUrl(nextUrl);
 
         } catch (err) {
+            if (!isCurrent()) return;
+
             console.error(err);
-            setError('Nepodařilo se načíst data jídelních lístků.');
+            setError(
+                'Nepodařilo se načíst data jídelních lístků.'
+            );
         } finally {
-            setIsLoadingData(false);
+            if (isCurrent()) {
+                setIsLoadingData(false);
+            }
         }
-    };
+    }, [isAdmin, canReadMenu, isAuthLoading, accessKey]);
 
     useEffect(() => {
-        fetchData();
-    }, []);
+        if (isAuthLoading) return;
+
+        if (!canReadMenu) {
+            requestGeneration.current += 1;
+            setCurrentImageUrl(null);
+            setNextImageUrl(null);
+            setMenuPaths({});
+            setIsVisibleCurrent(false);
+            setIsVisibleNext(false);
+            setError(null);
+            setIsLoadingData(false);
+            return;
+        }
+
+        void fetchData();
+    }, [fetchData, isAuthLoading, canReadMenu]);
 
     // Přepínání viditelnosti v DB
     const toggleVisibility = async (type: 'current' | 'next') => {
@@ -80,15 +219,25 @@ export default function JidelniListekPage() {
         const nextState = !currentState;
 
         try {
-            const { error: updateError } = await supabase
-                .from('app_config')
-                .update({ is_visible: nextState })
-                .eq('id', configId);
+            const { data: updated, error: updateError } = await supabase.rpc(
+                'update_app_config_settings',
+                {
+                    p_id: configId,
+                    p_field: 'visibility',
+                    p_visible: nextState,
+                    p_text: null,
+                }
+            );
+
+            if (!updateError && updated !== true) {
+                throw new Error('Změna viditelnosti nebyla potvrzena.');
+            }
 
             if (updateError) throw updateError;
 
             if (type === 'current') setIsVisibleCurrent(nextState);
             if (type === 'next') setIsVisibleNext(nextState);
+            if (process.env.NEXT_PUBLIC_R2_ENABLED === 'true') await fetchData();
         } catch (err) {
             console.error(err);
             alert('Chyba při změně viditelnosti.');
@@ -143,14 +292,30 @@ export default function JidelniListekPage() {
         try {
             const compressedBlob = await compressImage(file, 1400, 0.75);
 
-            const { error: uploadError } = await supabase.storage
-                .from(BUCKET_NAME)
-                .upload(targetFile, compressedBlob, {
-                    contentType: 'image/jpeg',
-                    upsert: true,
-                });
+            if (process.env.NEXT_PUBLIC_R2_ENABLED === 'true') {
+                const configId = type === 'current' ? 'jidelni_listek' : 'jidelni_listek_priprava';
+                if (!(configId in menuPaths)) throw new Error('Obnovte seznam před nahráním.');
+                const path = await uploadR2File('jidelni-listek', compressedBlob, 'image/jpeg');
+                const { data, error } = await supabase.rpc(
+                    'set_app_config_file',
+                    {
+                        p_id: configId,
+                        p_path: path,
+                        p_expected_path: menuPaths[configId],
+                    }
+                );
 
-            if (uploadError) throw uploadError;
+                if (error?.code === 'PT409') {
+                    throw new Error('Jídelníček mezitím někdo změnil. Obnovte stránku.');
+                }
+                if (error) throw error;
+                if (data !== true) {
+                    throw new Error('Přiřazení souboru nebylo potvrzeno.');
+                }
+            } else {
+                const { error: uploadError } = await supabase.storage.from(BUCKET_NAME).upload(targetFile, compressedBlob, { contentType: 'image/jpeg', upsert: true });
+                if (uploadError) throw uploadError;
+            }
 
             alert(`Jídelní lístek pro ${type === 'current' ? 'aktuální' : 'následující'} týden byl úspěšně aktualizován.`);
             fetchData();

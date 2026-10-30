@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -9,9 +9,11 @@ import {
 } from "lucide-react";
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase/client';
+import { uploadR2File } from '@/lib/storage/timetable-upload';
+import { getPrivateFileUrl } from '@/lib/supabase/private-storage';
 
 export default function About() {
-  const { role, isLoading: isAuthLoading } = useAuth();
+  const { role } = useAuth();
   const isUserOrAdmin = role === 'user' || role === 'admin';
   const isAdmin = role === 'admin';
 
@@ -26,21 +28,31 @@ export default function About() {
 
   const BUCKET_NAME = 'oznameni';
   const FILE_NAME = 'upozorneni.jpg';
+  const [alertPath, setAlertPath] = useState<string | null | undefined>(undefined);
 
   // Načtení konfigurace upozornění
-  const fetchAlertData = async () => {
+  const fetchAlertData = useCallback(async () => {
     setIsLoadingAlert(true);
     try {
       const { data: configData, error: configError } = await supabase
         .from('app_config')
-        .select('id, is_visible, text_value')
+        .select(process.env.NEXT_PUBLIC_R2_ENABLED === 'true' ? 'id, is_visible, text_value, file_path' : 'id, is_visible, text_value')
         .in('id', ['dulezite_upozorneni']);
 
-      if (!configError && configData && configData.length > 0) {
-        setIsAlertVisible(configData[0].is_visible);
-        setAlertText(configData[0].text_value || "");
+      if (configError) throw configError;
+      const configs = configData as unknown as { id: string; is_visible: boolean; text_value: string | null; file_path?: string | null }[];
+      if (configs && configs.length > 0) {
+        setIsAlertVisible(configs[0].is_visible);
+        setAlertText(configs[0].text_value || "");
       }
 
+      if (process.env.NEXT_PUBLIC_R2_ENABLED === 'true') {
+        const config = configs?.[0];
+        setAlertPath(config ? config.file_path ?? null : undefined);
+        setAlertImageUrl(config && (isAdmin || config.is_visible)
+          ? await getPrivateFileUrl('oznameni', config.file_path || FILE_NAME).catch(() => null) : null);
+        return;
+      }
       const timestamp = new Date().getTime();
       const { data: urlData } = supabase.storage.from(BUCKET_NAME).getPublicUrl(FILE_NAME);
 
@@ -52,7 +64,7 @@ export default function About() {
     } finally {
       setIsLoadingAlert(false);
     }
-  };
+  }, [isAdmin]);
 
   useEffect(() => {
     if (isUserOrAdmin) {
@@ -60,17 +72,26 @@ export default function About() {
     } else {
       setIsLoadingAlert(false);
     }
-  }, [isUserOrAdmin]);
+  }, [isUserOrAdmin, fetchAlertData]);
 
   // Uložení nového textu adminem
   const handleSaveText = async () => {
     if (!isAdmin) return;
     setIsSavingText(true);
     try {
-      const { error } = await supabase
-        .from('app_config')
-        .update({ text_value: alertText })
-        .eq('id', 'dulezite_upozorneni');
+      const { data, error } = await supabase.rpc(
+          'update_app_config_settings',
+          {
+              p_id: 'dulezite_upozorneni',
+              p_field: 'text',
+              p_visible: null,
+              p_text: alertText,
+          }
+      );
+
+      if (!error && data !== true) {
+          throw new Error('Uložení textu nebylo potvrzeno.');
+      }
 
       if (error) throw error;
       alert("Text upozornění byl úspěšně uložen.");
@@ -87,13 +108,23 @@ export default function About() {
     if (!isAdmin) return;
     const nextState = !isAlertVisible;
     try {
-      const { error } = await supabase
-        .from('app_config')
-        .update({ is_visible: nextState })
-        .eq('id', 'dulezite_upozorneni');
+      const { data, error } = await supabase.rpc(
+          'update_app_config_settings',
+          {
+              p_id: 'dulezite_upozorneni',
+              p_field: 'visibility',
+              p_visible: nextState,
+              p_text: null,
+          }
+      );
+
+      if (!error && data !== true) {
+          throw new Error('Změna viditelnosti nebyla potvrzena.');
+      }
 
       if (error) throw error;
       setIsAlertVisible(nextState);
+      if (process.env.NEXT_PUBLIC_R2_ENABLED === 'true') await fetchAlertData();
     } catch (err) {
       console.error(err);
       alert("Chyba při změně viditelnosti.");
@@ -130,11 +161,29 @@ export default function About() {
         };
       });
 
-      const { error: uploadError } = await supabase.storage
-        .from(BUCKET_NAME)
-        .upload(FILE_NAME, compressedBlob, { contentType: 'image/jpeg', upsert: true });
+      if (process.env.NEXT_PUBLIC_R2_ENABLED === 'true') {
+        if (alertPath === undefined) throw new Error('Obnovte stránku před nahráním.');
+        const path = await uploadR2File('oznameni', compressedBlob, 'image/jpeg');
+        const { data, error } = await supabase.rpc(
+            'set_app_config_file',
+            {
+                p_id: 'dulezite_upozorneni',
+                p_path: path,
+                p_expected_path: alertPath,
+            }
+        );
 
-      if (uploadError) throw uploadError;
+        if (error?.code === 'PT409') {
+            throw new Error('Upozornění mezitím někdo změnil. Obnovte stránku.');
+        }
+        if (error) throw error;
+        if (data !== true) {
+            throw new Error('Přiřazení souboru nebylo potvrzeno.');
+        }
+      } else {
+        const { error } = await supabase.storage.from(BUCKET_NAME).upload(FILE_NAME, compressedBlob, { contentType: 'image/jpeg', upsert: true });
+        if (error) throw error;
+      }
 
       alert("Obrázek k upozornění byl úspěšně nahrán.");
       fetchAlertData();

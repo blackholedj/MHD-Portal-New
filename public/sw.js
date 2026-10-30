@@ -1,95 +1,27 @@
-// public/sw.js
-const STATIC_CACHE_NAME = "static-cache-v1";
-const IMAGE_CACHE_NAME = "jizdni-rady-images-cache-v1";
-
-// Statické assety, které chceme cachovat při instalaci
-const assetsToCache = [
-  "/",
-  "/user-portal/tables", // Zajištění, že se nacachuje hlavní stránka
-  "/manifest.json",
-  "/icons/icon-192x192.png",
-  // Zde by měly být další kritické CSS/JS soubory (po buildu)
-];
-
-// Instalace SW: Cachování statických assetů
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(STATIC_CACHE_NAME).then((cache) => {
-      console.log("[Service Worker] Installing static assets.");
-      return cache.addAll(assetsToCache).catch((error) => {
-        console.warn("[Service Worker] Failed to cache some assets:", error);
-      });
-    })
-  );
+// Cache only public, immutable assets. Auth, APIs and private files stay network-only.
+const STATIC_CACHE_NAME = 'mhd-static-20261021';
+const PUBLIC_ASSETS = ['/manifest.json', '/icons/logo192.png', '/icons/logo512.png'];
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(STATIC_CACHE_NAME).then(cache => cache.addAll(PUBLIC_ASSETS)).then(() => self.skipWaiting()));
 });
-
-// Aktivace SW: Vyčištění starých cache
-self.addEventListener("activate", (event) => {
-  const cacheAllowList = [STATIC_CACHE_NAME, IMAGE_CACHE_NAME];
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheAllowList.indexOf(cacheName) === -1) {
-            console.log("[Service Worker] Deleting old cache:", cacheName);
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
-  );
+self.addEventListener('activate', event => {
+  event.waitUntil(caches.keys().then(names => Promise.all(names
+    .filter(name => name !== STATIC_CACHE_NAME && (
+      name.startsWith('static-cache-') || name.startsWith('jizdni-rady-images-cache-') || name.startsWith('mhd-static-')
+    )).map(name => caches.delete(name)))).then(() => self.clients.claim()));
 });
-
-// Fetch událost: Strategie cachování
-self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
-
-  // 1. STRATEGIE PRO OBRÁZKY SUPABASE (Cache First)
-  if (
-    url.hostname === "abfuprplwnftsvichild.supabase.co" &&
-    url.pathname.includes("jizdni-rady")
-  ) {
-    event.respondWith(
-      caches.match(event.request).then((cachedResponse) => {
-        // Vrátit cachovanou verzi, pokud existuje
-        if (cachedResponse) {
-          return cachedResponse;
-        }
-
-        // Pokud ne, jít do sítě a cachovat
-        return fetch(event.request)
-          .then((response) => {
-            // Kontrola validity odezvy
-            if (
-              !response ||
-              response.status !== 200 ||
-              response.type !== "basic"
-            ) {
-              return response;
-            }
-
-            const responseToCache = response.clone();
-            caches.open(IMAGE_CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseToCache);
-            });
-
-            return response;
-          })
-          .catch((error) => {
-            console.error("[Service Worker] Image fetch failed:", error);
-            // Můžete vrátit placeholder obrázek
-            // return new Response('Image failed to load', { status: 404 });
-          });
-      })
-    );
-    return;
-  }
-
-  // 2. STRATEGIE PRO STRÁNKY/API (Network First nebo Cache Fallback)
-  // Pro zjednodušení použijeme jen obecnou cache pro JS/CSS assety
-  event.respondWith(
-    fetch(event.request).catch(() => {
-      return caches.match(event.request);
-    })
-  );
+self.addEventListener('fetch', event => {
+  const request = event.request;
+  const url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== self.location.origin ||
+      !(url.pathname.startsWith('/_next/static/') || PUBLIC_ASSETS.includes(url.pathname))) return;
+  event.respondWith(caches.open(STATIC_CACHE_NAME).then(async cache => {
+    const cached = await cache.match(request);
+    if (cached) return cached;
+    const response = await fetch(request);
+    if (response.ok && response.type === 'basic') {
+      event.waitUntil(cache.put(request, response.clone()).catch(() => {}));
+    }
+    return response;
+  }));
 });

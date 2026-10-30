@@ -1,36 +1,23 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MHD Portal 4.0.0
 
-## Getting Started
+Next.js application for the DPMOST portal, using Supabase authentication and RLS with private Cloudflare R2 files.
 
-First, run the development server:
+## Local development
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Install dependencies with `npm ci`. Configure `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` locally, then run `npm run dev`. Private R2 variables belong in the server environment only. Never commit connection files, credentials, database dumps, or local test fixtures.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The historically named `scripts/verify-staging-env.mjs` validates the known project and public-variable rules. **It does not establish staging isolation:** the configured project currently backs production. Use a separate database for tests that change data.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Timetables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Navigation: transport/day category → actual line → actual course. File URLs and images are requested only when opening a course detail. Morning and afternoon parts remain separate files.
 
-## Learn More
+Historical database convention is preserved: `course_number` contains the actual line; `line_number` contains the actual course. Filters, editing and new uploads follow this convention.
 
-To learn more about Next.js, take a look at the following resources:
+`supabase/migrations/202610300001_course_visibility.sql` adds course-level visibility. Existing courses are active by default. Admins can deactivate/reactivate the whole course; users cannot read inactive metadata or obtain new file URLs. Existing signed R2 URLs remain valid until their original expiration.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Release
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Back up the database and record the current Netlify deploy before applying a migration. Apply the visibility migration before deploying this release. Run the build with `NEXT_PUBLIC_R2_ENABLED=true`. Preserve production function settings for R2 reads and uploads and provide R2 credentials as private function variables. The local prebuild uses `R2_UPLOAD_ENABLED=false`; runtime upload enablement is configured separately for the deployed functions.
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Production: https://dpmost.netlify.app

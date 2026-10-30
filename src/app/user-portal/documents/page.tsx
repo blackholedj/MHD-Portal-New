@@ -1,13 +1,13 @@
 // src/app/user-portal/dokumenty/page.tsx
 'use client';
 
-import React, { useState, useEffect, useCallback, FormEvent } from 'react';
+import React, { useState, useEffect, useCallback, useRef, FormEvent } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { getPrivateFileUrl } from '@/lib/supabase/private-storage';
 import { useAuth } from '@/context/AuthContext';
 import { GridLoader } from 'react-spinners';
-import Link from 'next/link';
 // Přidány ikony pro Úpravu a Smazání
-import { FileText, BookOpen, Settings, Info, Download, Edit, Trash2, X } from 'lucide-react'; 
+import { FileText, BookOpen, Info, Download, Edit, Trash2, X } from 'lucide-react';
 
 // --- TYPY DAT Z DATABÁZE ---
 interface Document {
@@ -30,7 +30,7 @@ interface EditDocumentModalProps {
     isOpen: boolean;
     onClose: () => void;
     document: Document | null;
-    onSave: (updatedDoc: Partial<Document>) => void;
+    onSave: (updatedDoc: Partial<Document>) => Promise<void>;
 }
 
 // 💡 Zde byste normálně importovali skutečnou komponentu modalu.
@@ -56,9 +56,9 @@ const EditDocumentModal: React.FC<EditDocumentModalProps> = ({ isOpen, onClose, 
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value, type } = e.target;
-        
+
         // Speciální ošetření pro checkbox
-        const inputValue = type === 'checkbox' 
+        const inputValue = type === 'checkbox'
             ? (e.target as HTMLInputElement).checked
             : value;
 
@@ -71,22 +71,19 @@ const EditDocumentModal: React.FC<EditDocumentModalProps> = ({ isOpen, onClose, 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
         setIsSaving(true);
-        
+
         // Filtrování pouze změněných hodnot
         const changes: Partial<Document> = {};
         let isChanged = false;
-        
-        (['title', 'description', 'type', 'admin_only'] as Array<keyof Document>).forEach(key => {
-            // TypeScript bezpečné porovnání
-            const currentValue = document[key];
-            const newValue = formData[key];
-            
-            // Kontrola změn (zejména pro null/string a boolean)
-            if (newValue !== undefined && newValue !== currentValue) {
-                changes[key] = newValue as any;
+
+        const addChange = <K extends keyof Document,>(key: K) => {
+            const value = formData[key];
+            if (value !== undefined && value !== document[key]) {
+                changes[key] = value;
                 isChanged = true;
             }
-        });
+        };
+        addChange('title'); addChange('description'); addChange('type');
 
         try {
             if (isChanged) {
@@ -110,8 +107,8 @@ const EditDocumentModal: React.FC<EditDocumentModalProps> = ({ isOpen, onClose, 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white dark:bg-zinc-800 p-6 rounded-lg shadow-2xl max-w-lg w-full relative">
-                <button 
-                    onClick={onClose} 
+                <button
+                    onClick={onClose}
                     className="absolute top-3 right-3 text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-100"
                     disabled={isSaving}
                 >
@@ -119,7 +116,7 @@ const EditDocumentModal: React.FC<EditDocumentModalProps> = ({ isOpen, onClose, 
                 </button>
 
                 <h2 className="text-xl font-bold mb-4 text-gray-800 dark:text-gray-100">Upravit dokument</h2>
-                
+
                 <form onSubmit={handleSubmit}>
                     {/* Název */}
                     <div className="mb-4">
@@ -173,6 +170,7 @@ const EditDocumentModal: React.FC<EditDocumentModalProps> = ({ isOpen, onClose, 
                             checked={!!formData.admin_only} // !! pro zajištění boolean hodnoty
                             onChange={handleChange}
                             className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600"
+                            disabled
                         />
                         <label htmlFor="admin_only" className="ml-2 text-sm font-medium text-gray-700 dark:text-zinc-300">
                             Dokument je pouze pro Adminy
@@ -181,15 +179,15 @@ const EditDocumentModal: React.FC<EditDocumentModalProps> = ({ isOpen, onClose, 
 
                     {/* Tlačítka */}
                     <div className="mt-4 flex justify-end space-x-2">
-                        <button 
+                        <button
                             type="button"
-                            onClick={onClose} 
+                            onClick={onClose}
                             className="px-4 py-2 bg-gray-300 dark:bg-zinc-600 text-gray-800 dark:text-zinc-100 rounded hover:bg-gray-400 transition"
                             disabled={isSaving}
                         >
                             Zrušit
                         </button>
-                        <button 
+                        <button
                             type="submit"
                             className="px-4 py-2 bg-blue-600 text-white rounded font-semibold hover:bg-blue-700 transition disabled:bg-blue-400"
                             disabled={isSaving}
@@ -239,26 +237,55 @@ const getTypeName = (type: DocumentType) => {
 // ----------------------------------------------------------------------
 
 const DocumentsPage = () => {
-    const { user, isLoading: isAuthLoading, status, role } = useAuth();
+    const {
+        user,
+        isLoading: isAuthLoading,
+        status,
+        role,
+        is_blocked,
+    } = useAuth();
     // 💡 Získání role Admin (předpoklad: role je na objektu user)
-    const isAdmin = role === 'admin'; 
-    
+    const isAdmin = role === 'admin';
+
     const [documents, setDocuments] = useState<Document[]>([]);
+    const [deletingId, setDeletingId] = useState<string | null>(null);
+    const deleteInFlight = useRef(false);
     const [isLoadingData, setIsLoadingData] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    
+
     const [selectedType, setSelectedType] = useState<DocumentType>('all');
     const [searchTerm, setSearchTerm] = useState('');
-    
+
     // 💡 Stavy pro Modal
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingDocument, setEditingDocument] = useState<Document | null>(null);
 
-    const getDownloadUrl = (filePath: string) => {
-      const { data } = supabase.storage
-        .from('documents')
-        .getPublicUrl(filePath);
-      return data.publicUrl;
+    const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+    // Signed URL se vytváří až po kliknutí; bezpečnost musí vynucovat Storage RLS.
+    const handleDownload = async (doc: Document) => {
+        if (!user || status !== 'approved' || is_blocked) {
+        setError('Dokumenty mohou stahovat pouze schválení uživatelé.');
+        return;
+      }
+      if (downloadingId !== null) return;
+      setDownloadingId(doc.id);
+      setError(null);
+      try {
+        const signedUrl = await getPrivateFileUrl('documents', doc.file_path, 60);
+        const anchor = document.createElement('a');
+        anchor.href = signedUrl;
+        anchor.target = '_blank';
+        anchor.rel = 'noopener noreferrer';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      } catch (downloadError) {
+        console.error('Stažení dokumentu selhalo:', downloadError);
+        setError('Soubor se nepodařilo zpřístupnit. Ověřte přístupová práva.');
+      } finally {
+        setDownloadingId(null);
+      }
     };
 
     const fetchDocuments = useCallback(async () => {
@@ -278,7 +305,7 @@ const DocumentsPage = () => {
       if (selectedType !== 'all') {
         query = query.eq('type', selectedType);
       }
-      
+
       if (searchTerm) {
           query = query.ilike('title', `%${searchTerm}%`);
       }
@@ -295,11 +322,23 @@ const DocumentsPage = () => {
     }, [selectedType, searchTerm, isAdmin]); // isAdmin přidán do závislostí
 
     useEffect(() => {
-      if (!isAuthLoading && user) {
-          fetchDocuments();
-      }
-    }, [isAuthLoading, user, fetchDocuments]);
-    
+        if (isAuthLoading) return;
+
+        if (!user || status !== 'approved' || is_blocked) {
+            setDocuments([]);
+            setIsLoadingData(false);
+            return;
+        }
+
+        fetchDocuments();
+    }, [
+        isAuthLoading,
+        user,
+        status,
+        is_blocked,
+        fetchDocuments,
+    ]);
+
     // --- ADMIN FUNKCE ---
 
     const handleEdit = (doc: Document) => {
@@ -309,68 +348,92 @@ const DocumentsPage = () => {
     };
 
     const handleSaveEdit = async (updatedDoc: Partial<Document>) => {
-        if (!editingDocument) return;
-
-        // V reálné aplikaci by zde bylo volání API pro uložení změn
-        console.log('Aktualizace dokumentu:', editingDocument.id, updatedDoc);
-
-        // Zde by mělo být volání do Supabase:
-        /*
-        const { error } = await supabase
-            .from('documents')
-            .update(updatedDoc)
-            .eq('id', editingDocument.id);
-
-        if (error) {
-            alert('Chyba při ukládání: ' + error.message);
-            return;
+        if (!isAdmin || !user || status !== 'approved' || is_blocked || !editingDocument) {
+            throw new Error('Nemáte oprávnění upravovat dokumenty.');
         }
-        */
 
-        // Pro ukázku aktualizujeme lokální stav
-        setDocuments(prevDocs => prevDocs.map(d => 
-            d.id === editingDocument.id ? { ...d, ...updatedDoc } : d
-        ));
+        const changes = {
+            ...(updatedDoc.title !== undefined && {
+                title: updatedDoc.title.trim(),
+            }),
+            ...(updatedDoc.description !== undefined && {
+                description: updatedDoc.description,
+            }),
+            ...(updatedDoc.type !== undefined && {
+                type: updatedDoc.type,
+            }),
+            /* ...(updatedDoc.admin_only !== undefined && {
+                admin_only: updatedDoc.admin_only,
+            }), */
+        };
+
+        if ('title' in changes && !changes.title) {
+            throw new Error('Název dokumentu nesmí být prázdný.');
+        }
+
+        const { data, error: updateError } = await supabase
+            .from('documents')
+            .update(changes)
+            .eq('id', editingDocument.id)
+            .select('id')
+            .single();
+
+        if (updateError) {
+            console.error('Chyba při aktualizaci dokumentu:', updateError);
+            throw new Error('Nepodařilo se uložit změny do databáze.');
+        }
+
+        if (!data) {
+            throw new Error('Dokument nebyl aktualizován.');
+        }
+
+        await fetchDocuments();
+
         setIsModalOpen(false);
         setEditingDocument(null);
-        // Po skutečné úpravě je dobré zavolat fetchDocuments() pro znovunačtení ze serveru
-        // fetchDocuments(); 
-        //alert('Dokument upraven (simulace).');
     };
 
-    const handleDelete = async (docId: string, filePath: string) => {
-        if (!isAdmin || !confirm('Opravdu chcete dokument Smazat? Tato akce je nevratná.')) return;
-
+    const handleDelete = async (document: Document) => {
+        if (!isAdmin || !user || status !== 'approved' || is_blocked) {
+            setError('Nemáte oprávnění mazat dokumenty.');
+            return;
+        }
+        if (process.env.NEXT_PUBLIC_R2_ENABLED !== 'true') {
+            setError('Mazání je dostupné až po aktivaci bezpečné migrace souborů.');
+            return;
+        }
+        if (deleteInFlight.current) return;
+        if (!window.confirm(`Odstranit dokument „${document.title}“ ze seznamu? Tuto akci nelze vrátit. Soubor v úložišti zůstane zachován.`)) return;
+        deleteInFlight.current = true;
+        setDeletingId(document.id);
+        setError(null);
         try {
-            setIsLoadingData(true);
-            
-            // 1. Smazání souboru ze Supabase Storage
-            const { error: storageError } = await supabase.storage
-                .from('documents')
-                .remove([filePath]);
-
-            if (storageError) throw storageError;
-
-            // 2. Smazání záznamu z tabulky dokumentů
-            const { error: dbError } = await supabase
-                .from('documents')
-                .delete()
-                .eq('id', docId);
-
-            if (dbError) throw dbError;
-
-            // 3. Aktualizace stavu po smazání
-            setDocuments(prevDocs => prevDocs.filter(doc => doc.id !== docId));
-            alert('Dokument byl úspěšně smazán.');
-
+            // A single conditional DELETE protects against stale list data.
+            // RLS authorizes the caller; the existing trigger queues eligible
+            // tracked paths. No Storage or R2 object is deleted here.
+            let query = supabase.from('documents').delete()
+                .eq('id', document.id)
+                .eq('file_path', document.file_path)
+                .eq('title', document.title)
+                .eq('type', document.type)
+                .eq('admin_only', document.admin_only);
+            query = document.description === null
+                ? query.is('description', null)
+                : query.eq('description', document.description);
+            const { data, error: deleteError } = await query.select('id');
+            if (deleteError) throw new Error('Odstranění se nepodařilo potvrdit. Obnovte seznam před dalším pokusem.');
+            if (!Array.isArray(data) || data.length !== 1 || String(data[0].id) !== String(document.id)) {
+                throw new Error('Dokument se mezitím změnil nebo již není dostupný. Obnovte seznam.');
+            }
+            await fetchDocuments();
         } catch (error) {
-            console.error('Chyba při mazání dokumentu:', error);
-            alert(`Nepodařilo se smazat dokument: ${error instanceof Error ? error.message : String(error)}`);
+            setError(error instanceof Error ? error.message : 'Dokument se nepodařilo odstranit.');
         } finally {
-            setIsLoadingData(false);
+            deleteInFlight.current = false;
+            setDeletingId(null);
         }
     };
-    
+
     // Loading stavy (úprava pro dark mód)
     if (isAuthLoading || isLoadingData) {
       return (
@@ -390,7 +453,7 @@ const DocumentsPage = () => {
     }
 
     // Odepřený přístup (úprava pro dark mód)
-    if (!user || status !== 'approved') {
+    if (!user || status !== 'approved' || is_blocked) {
       return (
           <div className="p-8 text-center bg-white dark:bg-zinc-800 rounded-lg shadow-xl mx-auto max-w-md mt-10">
               <h1 className="text-2xl text-red-600 dark:text-red-400 font-bold">Přístup odepřen</h1>
@@ -398,7 +461,7 @@ const DocumentsPage = () => {
           </div>
       );
     }
-    
+
     // Hlavní render
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 p-4 sm:p-8">
@@ -407,7 +470,7 @@ const DocumentsPage = () => {
           <h1 className="max-w-6xl mx-auto text-2xl font-bold mb-6 text-gray-800 dark:text-gray-100 border-b pb-2">
             Dokumenty {isAdmin && <span className="text-2xl text-red-500">(ADMIN)</span>}
           </h1>
-            
+
             {/* Tlačítko pro Správu (Pouze Admin)
             {isAdmin && (
                 <div className="mb-6 flex justify-end">
@@ -420,7 +483,7 @@ const DocumentsPage = () => {
                     </Link>
                 </div>
             )} */}
-          
+
           {/* Sekce Filtrů a Vyhledávání (Responsivní layout) */}
           <div className="bg-white dark:bg-zinc-800 p-4 sm:p-6 rounded-xl shadow-lg mb-8 flex flex-col md:flex-row gap-4">
                 {/* ... filtry beze zmen ... */}
@@ -468,8 +531,8 @@ const DocumentsPage = () => {
             <div className="space-y-4">
               {documents.map((doc) => (
                 // Karta dokumentu
-                <div 
-                  key={doc.id} 
+                <div
+                  key={doc.id}
                   className="bg-white dark:bg-zinc-800 p-4 sm:p-5 rounded-xl shadow flex flex-col sm:flex-row items-start sm:items-center justify-between hover:shadow-xl transition-shadow border border-gray-100 dark:border-zinc-700"
                 >
                   <div className="flex items-start space-x-3 sm:space-x-4 w-full sm:w-auto">
@@ -483,7 +546,7 @@ const DocumentsPage = () => {
                       </p>
                     </div>
                   </div>
-                  
+
                   {/* Akční Tlačítka (Download + Admin Actions) */}
                   <div className="mt-4 sm:mt-0 sm:ml-6 shrink-0 flex gap-2 w-full sm:w-auto justify-end sm:justify-start">
                         {/* 💡 Admin Tlačítka (Úprava a Smazání) */}
@@ -497,7 +560,8 @@ const DocumentsPage = () => {
                                     <Edit className="w-4 h-4" />
                                 </button>
                                 <button
-                                    onClick={() => handleDelete(doc.id, doc.file_path)} // Smaže dokument
+                                    onClick={() => void handleDelete(doc)}
+                                    disabled={deletingId !== null}
                                     className="p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
                                     title="Smazat dokument"
                                 >
@@ -505,24 +569,19 @@ const DocumentsPage = () => {
                                 </button>
                             </>
                         )}
-                        
+
                         {/* Tlačítko pro stažení */}
-                        <Link
-                          href={getDownloadUrl(doc.file_path)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center justify-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition w-full sm:w-auto"
-                        >
+                        <button type="button" onClick={() => void handleDownload(doc)} disabled={downloadingId !== null} className="flex items-center justify-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition w-full sm:w-auto disabled:opacity-50">
                           <Download className="w-4 h-4" />
-                          <span>Stáhnout</span>
-                        </Link>
+                          <span>{downloadingId === doc.id ? 'Připravuji…' : 'Stáhnout'}</span>
+                        </button>
                   </div>
                 </div>
               ))}
             </div>
           )}
         </div>
-        
+
         {/* 💡 Vykreslení Modalu pro úpravu */}
         <EditDocumentModal
             isOpen={isModalOpen}

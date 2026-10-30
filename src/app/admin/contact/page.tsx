@@ -1,9 +1,9 @@
 // src/app/admin/contact/page.tsx
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
-import { Mail, Trash2, Eye, EyeOff, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Mail, Trash2, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react';
 
 // Typ pro jednu zprávu z tabulky contact_submissions
 interface Submission {
@@ -20,30 +20,41 @@ const ContactManager: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const fetchSubmissions = useCallback(async () => {
-        setIsLoading(true);
-        setError(null);
+    // Asynchronní načtení zpráv při připojení komponenty.
+    useEffect(() => {
+        let active = true;
 
-        // Načteme všechny zprávy, nejnovější první
-        const { data, error } = await supabase
+        void Promise.resolve(supabase
             .from('contact_form')
             .select('*')
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false }))
+            .then(({ data, error }) => {
+                if (!active) return;
 
-        if (error) {
-            console.error('Chyba při načítání zpráv:', error);
-            setError('Nepodařilo se načíst zprávy. Zkontrolujte RLS politiky (SELECT pro admina).');
-            setSubmissions([]);
-        } else {
-            setSubmissions(data || []);
-        }
-        setIsLoading(false);
+                if (error) {
+                    console.error('Chyba při načítání zpráv:', error);
+                    setError('Nepodařilo se načíst zprávy. Zkontrolujte RLS politiky (SELECT pro admina).');
+                    setSubmissions([]);
+                } else {
+                    setError(null);
+                    setSubmissions(data || []);
+                }
+
+                setIsLoading(false);
+            })
+            .catch((error: unknown) => {
+                if (!active) return;
+
+                console.error('Chyba při načítání zpráv:', error);
+                setError('Nepodařilo se načíst zprávy. Zkontrolujte RLS politiky (SELECT pro admina).');
+                setSubmissions([]);
+                setIsLoading(false);
+            });
+
+        return () => {
+            active = false;
+        };
     }, []);
-
-    // Načtení dat při prvním renderu
-    useEffect(() => {
-        fetchSubmissions();
-    }, [fetchSubmissions]);
 
     // --- MANIPULAČNÍ FUNKCE ---
 

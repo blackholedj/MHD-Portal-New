@@ -35,7 +35,7 @@ const UserPortalLayout = ({ children }: { children: React.ReactNode }) => {
     }
 
     // 3. KONTROLA NESSCHVÁLENÉHO UŽIVATELE (status = 'pending')
-    if (status === 'pending') {
+    if (status !== 'approved') {
       // Pokud UŽIVATEL ČEKÁ a NENÍ na informační stránce, přesměruj ho tam.
       if (pathname !== PENDING_PATH) {
         router.push(PENDING_PATH);
@@ -70,7 +70,7 @@ const UserPortalLayout = ({ children }: { children: React.ReactNode }) => {
   }
   
   // Blokování vykreslení obsahu pro neschválené/blokované uživatele
-  if (!user || is_blocked || status === 'pending') {
+  if (!user || is_blocked || status !== 'approved') {
     // Vrátíme null, aby se nevykreslil chráněný obsah, pokud se čeká na přesměrování
     return null;
   }

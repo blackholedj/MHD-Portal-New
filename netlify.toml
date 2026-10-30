@@ -1,8 +1,15 @@
 # netlify.toml
 
 [build]
-  command = "npm run build"
+  command = "npm run build -- --webpack"
   publish = ".next"
 
 [functions]
   node_bundler = "esbuild"
+
+[build.environment]
+  NODE_VERSION = "22"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+# Set private R2 credentials in Netlify with Functions scope.
+# Keep R2_READ_ENABLED unset until the entire R2 migration passes.

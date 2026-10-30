@@ -1,7 +1,7 @@
 // src/components/common/UserProfileModal.tsx
 import React from 'react';
 import { Role } from '@/context/AuthContext'; // Importujte Role type
-import { X, User as UserIcon, Briefcase, CheckCircle, Clock, Mail } from 'lucide-react';
+import { X, User as UserIcon, Briefcase, CheckCircle, Mail } from 'lucide-react';
 
 interface UserData {
     email: string;
