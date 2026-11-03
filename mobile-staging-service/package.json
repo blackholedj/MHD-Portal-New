@@ -1,0 +1,24 @@
+{
+  "name": "dpmost-mobile-staging-api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/verify-mobile-staging-env.mjs && next build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1154.0",
+    "@aws-sdk/s3-request-presigner": "^3.1154.0",
+    "@supabase/supabase-js": "^2.78.0",
+    "next": "^16.2.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5"
+  }
+}
