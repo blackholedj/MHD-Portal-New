@@ -24,7 +24,6 @@ function stagingIsConfigured(): boolean {
   const env = process.env;
 
   if (
-    env.DPMOST_DEPLOY_TARGET !== 'mobile-staging' ||
     env.R2_READ_ENABLED !== 'true' ||
     env.R2_UPLOAD_ENABLED === 'true' ||
     env.R2_DELETE_ENABLED === 'true'
@@ -32,20 +31,28 @@ function stagingIsConfigured(): boolean {
     return false;
   }
 
-  const expectedRef = env.DPMOST_STAGING_SUPABASE_REF;
+  const target = env.DPMOST_DEPLOY_TARGET;
 
-  if (
-    !expectedRef ||
-    !/^[a-z0-9]{20}$/.test(expectedRef) ||
-    expectedRef === 'pxhdbjctgnaarijmkmfq'
-  ) {
-    return false;
-  }
+  if (target === 'mobile-local') {
+    if (
+      env.NEXT_PUBLIC_SUPABASE_URL !==
+      'http://127.0.0.1:57321'
+    ) {
+      return false;
+    }
+  } else if (target === 'mobile-staging') {
+    const expectedRef = env.DPMOST_STAGING_SUPABASE_REF;
 
-  if (
-    env.NEXT_PUBLIC_SUPABASE_URL !==
-    `https://${expectedRef}.supabase.co`
-  ) {
+    if (
+      !expectedRef ||
+      !/^[a-z0-9]{20}$/.test(expectedRef) ||
+      expectedRef === 'pxhdbjctgnaarijmkmfq' ||
+      env.NEXT_PUBLIC_SUPABASE_URL !==
+        `https://${expectedRef}.supabase.co`
+    ) {
+      return false;
+    }
+  } else {
     return false;
   }
 

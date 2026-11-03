@@ -6,51 +6,32 @@ const env = process.env;
 // ověřovacího skriptu webového projektu.
 const PRODUCTION_SUPABASE_REF = 'pxhdbjctgnaarijmkmfq';
 
-assert.equal(
-  env.DPMOST_DEPLOY_TARGET,
-  'mobile-staging',
-  'Povoleno je pouze explicitní mobile-staging prostředí.',
+const target = env.DPMOST_DEPLOY_TARGET;
+const local = target === 'mobile-local';
+
+assert.ok(
+  local || target === 'mobile-staging',
+  'Nepovoleny rezim nasazeni.',
 );
 
-const url = new URL(env.NEXT_PUBLIC_SUPABASE_URL ?? '');
+const configuredUrl = env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 
-assert.match(
-  url.hostname,
-  /^[a-z0-9]{20}\.supabase\.co$/,
-  'Neplatná Supabase adresa.',
-);
+if (local) {
+  assert.equal(
+    configuredUrl,
+    'http://127.0.0.1:57321',
+    'Lokalni rezim smi pouzit pouze Docker Supabase.',
+  );
+} else {
+  const url = new URL(configuredUrl);
+  const expectedRef = env.DPMOST_STAGING_SUPABASE_REF ?? '';
 
-assert.equal(
-  url.protocol,
-  'https:',
-  'Supabase musí používat HTTPS.',
-);
-
-assert.notEqual(
-  url.hostname,
-  `${PRODUCTION_SUPABASE_REF}.supabase.co`,
-  'Produkční Supabase je ve stagingu zakázaná.',
-);
-
-const expectedRef = env.DPMOST_STAGING_SUPABASE_REF ?? '';
-
-assert.match(
-  expectedRef,
-  /^[a-z0-9]{20}$/,
-  'Chybí identifikátor staging Supabase.',
-);
-
-assert.notEqual(
-  expectedRef,
-  PRODUCTION_SUPABASE_REF,
-  'Produkční Supabase není povolena.',
-);
-
-assert.equal(
-  url.hostname,
-  `${expectedRef}.supabase.co`,
-  'Supabase URL neodpovídá staging projektu.',
-);
+  assert.match(url.hostname, /^[a-z0-9]{20}\.supabase\.co$/);
+  assert.equal(url.protocol, 'https:');
+  assert.match(expectedRef, /^[a-z0-9]{20}$/);
+  assert.notEqual(expectedRef, PRODUCTION_SUPABASE_REF);
+  assert.equal(url.hostname, `${expectedRef}.supabase.co`);
+}
 
 const publicKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
@@ -70,11 +51,13 @@ if (publicKey.startsWith('eyJ')) {
     Buffer.from(payload, 'base64url').toString(),
   );
 
-  assert.equal(
-    claims.ref,
-    url.hostname.split('.')[0],
-    'Supabase klíč neodpovídá staging projektu.',
-  );
+  if (!local) {
+    assert.equal(
+      claims.ref,
+      new URL(configuredUrl).hostname.split('.')[0],
+      'Supabase klíč neodpovídá staging projektu.',
+    );
+  }
 
   assert.equal(
     claims.role,
