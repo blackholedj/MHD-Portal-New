@@ -6,7 +6,16 @@ import type { FileBucket } from './types';
 export async function canReadPrivateFile(client: SupabaseClient, userId: string, bucket: FileBucket, path: string): Promise<boolean> {
   const { data: profile, error } = await client.from('profiles')
     .select('role,status,is_blocked').eq('id', userId).single();
-  if (error || !profile || profile.status !== 'approved' || profile.is_blocked !== false) return false;
+  if (
+    error ||
+    !profile ||
+    profile.status !== 'approved' ||
+    profile.is_blocked !== false ||
+    (profile.role !== 'admin' && profile.role !== 'user')
+  ) {
+    return false;
+  }
+
   const admin = profile.role === 'admin';
   if (bucket === 'documents') {
     // Mirror the existing Storage gate as well as metadata RLS.
