@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "prebuild": "node scripts/verify-staging-env.mjs"
+    "prebuild": "node scripts/verify-staging-env.mjs",
+    "deploy:preview": "node scripts/deploy-netlify.mjs",
+    "deploy:production": "node scripts/deploy-netlify.mjs --prod"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1154.0",
