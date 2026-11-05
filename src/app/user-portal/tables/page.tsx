@@ -138,19 +138,6 @@ const JizdniRadFilters: React.FC<FilterProps> = ({ filters, onFilterChange, onSe
                     </select>
                 </div>
                 <div>
-                    <label htmlFor="lineNumber" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Linky</label>
-                    <input
-                        type="text"
-                        id="lineNumber"
-                        value={filters.course_number}
-                        onChange={(e) => onFilterChange({ course_number: e.target.value })}
-                        onKeyDown={(e) => e.key === 'Enter' && onSearch()}
-                        className="mt-1 block w-full border border-gray-300 dark:border-zinc-600 rounded-lg shadow-sm p-2 dark:bg-zinc-700 dark:text-zinc-100 placeholder:text-zinc-400 focus:border-blue-500 focus:ring-blue-500 transition"
-                        placeholder="3"
-                        disabled={isLoading}
-                    />
-                </div>
-                <div>
                     <label htmlFor="courseNumber" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Kurzu</label>
                     <input
                         type="text"
@@ -160,6 +147,19 @@ const JizdniRadFilters: React.FC<FilterProps> = ({ filters, onFilterChange, onSe
                         onKeyDown={(e) => e.key === 'Enter' && onSearch()}
                         className="mt-1 block w-full border border-gray-300 dark:border-zinc-600 rounded-lg shadow-sm p-2 dark:bg-zinc-700 dark:text-zinc-100 placeholder:text-zinc-400 focus:border-blue-500 focus:ring-blue-500 transition"
                         placeholder="101"
+                        disabled={isLoading}
+                    />
+                </div>
+                <div>
+                    <label htmlFor="lineNumber" className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Číslo Linky</label>
+                    <input
+                        type="text"
+                        id="lineNumber"
+                        value={filters.course_number}
+                        onChange={(e) => onFilterChange({ course_number: e.target.value })}
+                        onKeyDown={(e) => e.key === 'Enter' && onSearch()}
+                        className="mt-1 block w-full border border-gray-300 dark:border-zinc-600 rounded-lg shadow-sm p-2 dark:bg-zinc-700 dark:text-zinc-100 placeholder:text-zinc-400 focus:border-blue-500 focus:ring-blue-500 transition"
+                        placeholder="3"
                         disabled={isLoading}
                     />
                 </div>
