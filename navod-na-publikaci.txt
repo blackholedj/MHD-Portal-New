@@ -1,0 +1,21 @@
+Pri zmene , uprave projektu tak pak deploy na web proved ve slozce projektu tento prikaz
+
+cd /Users/macbookl/Programovani/Projekty/Webove/DPMOST/portal
+npm run deploy:production
+
+Pro uložení opravy a deploy postupu na GitHub spusť:
+cd /Users/macbookl/Programovani/Projekty/Webove/DPMOST/portal
+
+git add netlify.toml package.json scripts/deploy-netlify.mjs DEPLOY.md
+git diff --cached --stat
+git commit -m "Fix Netlify image routing and add deployment workflow"
+git push origin main
+
+
+Soukromý .env.deploy.local zůstane mimo Git. Příkazy také vynechají nesouvisející supabase/.gitignore.
+
+Úspěšné odeslání ověříš:
+
+git status -sb
+
+U větve main...origin/main by nemělo být uvedeno ahead.
